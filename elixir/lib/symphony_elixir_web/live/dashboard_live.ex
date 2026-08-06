@@ -14,6 +14,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
       socket
       |> assign(:payload, load_payload())
       |> assign(:now, DateTime.utc_now())
+      |> assign(:harness_flash, nil)
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -22,6 +23,30 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
     {:ok, socket}
   end
+
+  @impl true
+  def handle_event("select_harness", %{"harness" => harness}, socket) do
+    normalized = harness |> to_string() |> String.trim() |> String.downcase()
+
+    case normalized do
+      kind when kind in ["codex", "prime"] ->
+        case update_workflow_harness(kind) do
+          :ok ->
+            {:noreply,
+             socket
+             |> assign(:payload, load_payload())
+             |> assign(:harness_flash, "Harness set to #{kind} for next dispatches.")}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, :harness_flash, "Failed to update harness: #{inspect(reason)}")}
+        end
+
+      _ ->
+        {:noreply, assign(socket, :harness_flash, "Unknown harness: #{inspect(harness)}")}
+    end
+  end
+
+  def handle_event("select_harness", _params, socket), do: {:noreply, socket}
 
   @impl true
   def handle_info(:runtime_tick, socket) do
@@ -56,6 +81,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </div>
 
           <div class="status-stack">
+            <form phx-change="select_harness" phx-submit="select_harness" class="harness-picker">
+              <label class="harness-picker-label" for="harness-select">Agent harness</label>
+              <select id="harness-select" name="harness" class="harness-select">
+                <option value="codex" selected={@payload[:harness] == "codex"}>Codex (default)</option>
+                <option value="prime" selected={@payload[:harness] == "prime"}>Prime Agent</option>
+              </select>
+              <span class="harness-picker-hint">Applies to next dispatches; use label `harness:prime` per issue.</span>
+              <%= if @harness_flash do %>
+                <span class="harness-flash"><%= @harness_flash %></span>
+              <% end %>
+            </form>
             <span class="status-badge status-badge-live">
               <span class="status-badge-dot"></span>
               Live
@@ -148,6 +184,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <tr>
                     <th>Issue</th>
                     <th>State</th>
+                    <th>Harness</th>
                     <th>Session</th>
                     <th>Runtime / turns</th>
                     <th>Codex update</th>
@@ -165,6 +202,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     <td>
                       <span class={state_badge_class(entry.state)}>
                         <%= entry.state %>
+                      </span>
+                    </td>
+                    <td>
+                      <span class={harness_badge_class(entry.harness)}>
+                        <%= harness_label(entry.harness) %>
                       </span>
                     </td>
                     <td>
@@ -229,6 +271,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   <tr>
                     <th>Issue</th>
                     <th>State</th>
+                    <th>Harness</th>
                     <th>Session</th>
                     <th>Blocked at</th>
                     <th>Last update</th>
@@ -246,6 +289,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
                     <td>
                       <span class={state_badge_class(entry.state || "Blocked")}>
                         <%= entry.state || "Blocked" %>
+                      </span>
+                    </td>
+                    <td>
+                      <span class={harness_badge_class(entry.harness)}>
+                        <%= harness_label(entry.harness) %>
                       </span>
                     </td>
                     <td>
@@ -437,10 +485,49 @@ defmodule SymphonyElixirWeb.DashboardLive do
     end
   end
 
+  defp harness_label(harness) do
+    case harness do
+      "prime" -> "prime"
+      _ -> "codex"
+    end
+  end
+
+  defp harness_badge_class(harness) do
+    case harness do
+      "prime" -> "harness-badge harness-badge-prime"
+      _ -> "harness-badge harness-badge-codex"
+    end
+  end
+
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
   end
 
   defp pretty_value(nil), do: "n/a"
   defp pretty_value(value), do: inspect(value, pretty: true, limit: :infinity)
+
+  defp update_workflow_harness(kind) do
+    path = SymphonyElixir.Workflow.workflow_file_path()
+
+    with {:ok, content} <- File.read(path) do
+      updated =
+        if String.contains?(content, "harness:") do
+          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, content, "harness:\n  kind: #{kind}\n")
+          |> then(fn c ->
+            if String.contains?(c, "kind: #{kind}"), do: c, else: String.replace(c, ~r/harness:\s*\n/, "harness:\n  kind: #{kind}\n", global: false)
+          end)
+        else
+          String.replace(content, "---\n", "---\nharness:\n  kind: #{kind}\n", global: false)
+        end
+
+      case File.write(path, updated) do
+        :ok ->
+          SymphonyElixir.WorkflowStore.force_reload()
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
 end

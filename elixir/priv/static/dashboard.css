@@ -184,11 +184,74 @@ pre,
   font-size: 1rem;
 }
 
+.harness-picker {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: end;
+  margin-bottom: 0.75rem;
+}
+
+.harness-picker-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.harness-select {
+  min-width: 10rem;
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: white;
+  color: var(--ink);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.harness-picker-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-align: right;
+}
+
+.harness-flash {
+  font-size: 0.82rem;
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.harness-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.6rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.harness-badge-codex {
+  background: var(--accent-soft);
+  border-color: rgba(16, 163, 127, 0.18);
+  color: var(--accent-ink);
+}
+
+.harness-badge-prime {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: #3730a3;
+}
+
 .status-stack {
   display: grid;
   justify-items: end;
   align-content: start;
-  min-width: min(100%, 9rem);
+  min-width: min(100%, 12rem);
 }
 
 .status-badge {

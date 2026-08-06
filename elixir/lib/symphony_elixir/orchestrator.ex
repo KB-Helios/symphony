@@ -158,6 +158,7 @@ defmodule SymphonyElixir.Orchestrator do
           running_entry
           |> maybe_put_runtime_value(:worker_host, runtime_info[:worker_host])
           |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
+          |> maybe_put_runtime_value(:harness, runtime_info[:harness])
 
         notify_dashboard()
         {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
@@ -759,6 +760,7 @@ defmodule SymphonyElixir.Orchestrator do
       issue_id: issue_id,
       identifier: Map.get(running_entry, :identifier, issue_id),
       issue: Map.get(running_entry, :issue),
+      harness: Map.get(running_entry, :harness, "codex"),
       worker_host: Map.get(running_entry, :worker_host),
       workspace_path: Map.get(running_entry, :workspace_path),
       session_id: running_entry_session_id(running_entry),
@@ -951,13 +953,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+    harness = resolve_harness_for_issue(issue)
+
     case Task.Supervisor.start_child(state.task_supervisor, fn ->
-           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host)
+           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host, harness: harness)
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
 
-        Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} worker_host=#{worker_host || "local"}")
+        Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} harness=#{harness} worker_host=#{worker_host || "local"}")
 
         running =
           Map.put(state.running, issue.id, %{
@@ -966,6 +970,7 @@ defmodule SymphonyElixir.Orchestrator do
             identifier: issue.identifier,
             issue: issue,
             worker_host: worker_host,
+            harness: harness,
             workspace_path: nil,
             session_id: nil,
             last_codex_message: nil,
@@ -1419,6 +1424,7 @@ defmodule SymphonyElixir.Orchestrator do
           identifier: metadata.identifier,
           issue_url: metadata.issue.url,
           state: metadata.issue.state,
+          harness: Map.get(metadata, :harness, "codex"),
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: metadata.session_id,
@@ -1458,6 +1464,7 @@ defmodule SymphonyElixir.Orchestrator do
           identifier: Map.get(metadata, :identifier),
           issue_url: blocked_issue_url(metadata),
           state: blocked_issue_state(metadata),
+          harness: Map.get(metadata, :harness, "codex"),
           worker_host: Map.get(metadata, :worker_host),
           workspace_path: Map.get(metadata, :workspace_path),
           session_id: Map.get(metadata, :session_id),
@@ -1976,6 +1983,25 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp running_seconds(_started_at, _now), do: 0
+
+  defp resolve_harness_for_issue(issue) do
+    label_harness =
+      (issue.labels || [])
+      |> Enum.find_value(fn label ->
+        case label |> to_string() |> String.trim() |> String.downcase() do
+          "harness:prime" -> "prime"
+          "harness:codex" -> "codex"
+          "prime" -> "prime"
+          "codex" -> "codex"
+          _ -> nil
+        end
+      end)
+
+    case label_harness do
+      harness when harness in ["codex", "prime"] -> harness
+      _ -> SymphonyElixir.Config.harness_kind() |> SymphonyElixir.Harness.normalize_kind()
+    end
+  end
 
   defp integer_like(value) when is_integer(value) and value >= 0, do: value
 

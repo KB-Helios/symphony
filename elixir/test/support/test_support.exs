@@ -103,6 +103,10 @@ defmodule SymphonyElixir.TestSupport do
           workspace_root: Path.join(System.tmp_dir!(), "symphony_workspaces"),
           worker_ssh_hosts: [],
           worker_max_concurrent_agents_per_host: nil,
+          harness_kind: "codex",
+          prime_command: "prime-agent --mode rpc",
+          prime_provider: nil,
+          prime_model: nil,
           max_concurrent_agents: 10,
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
@@ -141,6 +145,10 @@ defmodule SymphonyElixir.TestSupport do
     workspace_root = Keyword.get(config, :workspace_root)
     worker_ssh_hosts = Keyword.get(config, :worker_ssh_hosts)
     worker_max_concurrent_agents_per_host = Keyword.get(config, :worker_max_concurrent_agents_per_host)
+    harness_kind = Keyword.get(config, :harness_kind)
+    prime_command = Keyword.get(config, :prime_command)
+    prime_provider = Keyword.get(config, :prime_provider)
+    prime_model = Keyword.get(config, :prime_model)
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
@@ -181,6 +189,7 @@ defmodule SymphonyElixir.TestSupport do
         "workspace:",
         "  root: #{yaml_value(workspace_root)}",
         worker_yaml(worker_ssh_hosts, worker_max_concurrent_agents_per_host),
+        harness_yaml(harness_kind, prime_command, prime_provider, prime_model),
         "agent:",
         "  max_concurrent_agents: #{yaml_value(max_concurrent_agents)}",
         "  max_turns: #{yaml_value(max_turns)}",
@@ -254,6 +263,19 @@ defmodule SymphonyElixir.TestSupport do
         "  max_concurrent_agents_per_host: #{yaml_value(max_concurrent_agents_per_host)}"
     ]
     |> Enum.reject(&(&1 in [nil, false]))
+    |> Enum.join("\n")
+  end
+
+  defp harness_yaml(harness_kind, prime_command, prime_provider, prime_model) do
+    [
+      "harness:",
+      "  kind: #{yaml_value(harness_kind)}",
+      "prime:",
+      "  command: #{yaml_value(prime_command)}",
+      prime_provider && "  provider: #{yaml_value(prime_provider)}",
+      prime_model && "  model: #{yaml_value(prime_model)}"
+    ]
+    |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
 

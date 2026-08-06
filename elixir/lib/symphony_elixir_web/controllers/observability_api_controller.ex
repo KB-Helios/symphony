@@ -13,6 +13,49 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
   end
 
+  @spec update_harness(Conn.t(), map()) :: Conn.t()
+  def update_harness(conn, %{"harness" => harness}) do
+    normalized = harness |> to_string() |> String.trim() |> String.downcase()
+
+    if normalized in SymphonyElixir.Harness.supported_harnesses() do
+      case update_workflow_harness(normalized) do
+        :ok ->
+          json(conn, %{harness: normalized, supported_harnesses: SymphonyElixir.Harness.supported_harnesses()})
+
+        {:error, reason} ->
+          error_response(conn, 500, "harness_update_failed", inspect(reason))
+      end
+    else
+      error_response(conn, 400, "invalid_harness", "harness must be one of: #{Enum.join(SymphonyElixir.Harness.supported_harnesses(), ", ")}")
+    end
+  end
+
+  def update_harness(conn, _params) do
+    error_response(conn, 400, "invalid_harness", "missing harness parameter")
+  end
+
+  defp update_workflow_harness(kind) do
+    path = SymphonyElixir.Workflow.workflow_file_path()
+
+    with {:ok, content} <- File.read(path) do
+      updated =
+        if String.contains?(content, "harness:") do
+          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, content, "harness:\n  kind: #{kind}\n")
+        else
+          String.replace(content, "---\n", "---\nharness:\n  kind: #{kind}\n", global: false)
+        end
+
+      case File.write(path, updated) do
+        :ok ->
+          SymphonyElixir.WorkflowStore.force_reload()
+          :ok
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
   @spec issue(Conn.t(), map()) :: Conn.t()
   def issue(conn, %{"issue_identifier" => issue_identifier}) do
     case Presenter.issue_payload(issue_identifier, orchestrator(), snapshot_timeout_ms()) do

@@ -11,8 +11,16 @@ defmodule SymphonyElixirWeb.Presenter do
 
     case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
       %{} = snapshot ->
+        harness =
+          case Config.settings() do
+            {:ok, settings} -> settings.harness.kind
+            _ -> "codex"
+          end
+
         %{
           generated_at: generated_at,
+          harness: harness,
+          supported_harnesses: SymphonyElixir.Harness.supported_harnesses(),
           counts: %{
             running: length(snapshot.running),
             retrying: length(snapshot.retrying),
@@ -105,6 +113,7 @@ defmodule SymphonyElixirWeb.Presenter do
       issue_identifier: entry.identifier,
       issue_url: Map.get(entry, :issue_url),
       state: entry.state,
+      harness: Map.get(entry, :harness, "codex"),
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path),
       session_id: entry.session_id,
@@ -140,6 +149,7 @@ defmodule SymphonyElixirWeb.Presenter do
       issue_identifier: entry.identifier,
       issue_url: Map.get(entry, :issue_url),
       state: entry.state,
+      harness: Map.get(entry, :harness, "codex"),
       error: entry.error,
       worker_host: Map.get(entry, :worker_host),
       workspace_path: Map.get(entry, :workspace_path),
@@ -153,6 +163,7 @@ defmodule SymphonyElixirWeb.Presenter do
 
   defp running_issue_payload(running) do
     %{
+      harness: Map.get(running, :harness, "codex"),
       worker_host: Map.get(running, :worker_host),
       workspace_path: Map.get(running, :workspace_path),
       session_id: running.session_id,
@@ -182,6 +193,7 @@ defmodule SymphonyElixirWeb.Presenter do
 
   defp blocked_issue_payload(blocked) do
     %{
+      harness: Map.get(blocked, :harness, "codex"),
       worker_host: Map.get(blocked, :worker_host),
       workspace_path: Map.get(blocked, :workspace_path),
       session_id: blocked.session_id,

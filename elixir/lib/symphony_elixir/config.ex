@@ -26,6 +26,8 @@ defmodule SymphonyElixir.Config do
           turn_sandbox_policy: map()
         }
 
+  @type harness_kind :: String.t()
+
   @spec settings() :: {:ok, Schema.t()} | {:error, term()}
   def settings do
     WorkflowStore.settings()
@@ -97,6 +99,15 @@ defmodule SymphonyElixir.Config do
     WorkflowStore.force_reload()
   end
 
+  @spec harness_kind() :: harness_kind()
+  def harness_kind do
+    settings!().harness.kind || "codex"
+  end
+
+  @spec harness_kind!(Schema.t()) :: harness_kind()
+  def harness_kind!(%Schema{harness: %{kind: kind}}) when kind in ["codex", "prime"], do: kind
+  def harness_kind!(_), do: "codex"
+
   @spec codex_runtime_settings(Path.t() | nil, keyword()) ::
           {:ok, codex_runtime_settings()} | {:error, term()}
   def codex_runtime_settings(workspace \\ nil, opts \\ []) do
@@ -111,6 +122,27 @@ defmodule SymphonyElixir.Config do
          }}
       end
     end
+  end
+
+  @spec prime_command() :: String.t()
+  def prime_command do
+    settings!().prime.command || "prime-agent --mode rpc"
+  end
+
+  @spec prime_settings() :: map()
+  def prime_settings do
+    settings = settings!()
+
+    %{
+      command: settings.prime.command,
+      provider: settings.prime.provider,
+      model: settings.prime.model,
+      thinking_level: settings.prime.thinking_level,
+      approval_policy: settings.prime.approval_policy,
+      turn_timeout_ms: settings.prime.turn_timeout_ms,
+      read_timeout_ms: settings.prime.read_timeout_ms,
+      stall_timeout_ms: settings.prime.stall_timeout_ms
+    }
   end
 
   @doc false
