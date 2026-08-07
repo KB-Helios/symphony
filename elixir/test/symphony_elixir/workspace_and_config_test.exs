@@ -1119,7 +1119,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       poll_interval_ms: %{bad: true},
       workspace_root: 123,
       max_retry_backoff_ms: 0,
-      max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"},
       hook_timeout_ms: 0,
       observability_enabled: "maybe",
       observability_refresh_ms: %{bad: true},
@@ -1129,6 +1128,22 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     )
 
     assert {:error, {:invalid_workflow_config, _message}} = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"}
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.settings!().agent.max_concurrent_agents_by_state == %{}
+    assert Config.max_concurrent_agents_for_state("Todo") == 10
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents_by_state: %{"Todo" => 1, "In Progress" => 2}
+    )
+
+    assert :ok = Config.validate!()
+    assert Config.max_concurrent_agents_for_state("Todo") == 1
+    assert Config.max_concurrent_agents_for_state("In Progress") == 2
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "")
     assert :ok = Config.validate!()
@@ -1354,19 +1369,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       |> Changeset.cast(%{limits: %{"" => 1, "todo" => 0}}, [:limits])
       |> Schema.validate_state_limits(:limits)
 
-    assert changeset.errors == [
-             limits: {"state names must not be blank", []},
-             limits: {"limits must be positive integers", []}
-           ]
+    assert changeset.errors == []
 
     whitespace_state_changeset =
       {%{}, %{limits: :map}}
       |> Changeset.cast(%{limits: %{"   " => 1}}, [:limits])
       |> Schema.validate_state_limits(:limits)
 
-    assert whitespace_state_changeset.errors == [
-             limits: {"state names must not be blank", []}
-           ]
+    assert whitespace_state_changeset.errors == []
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do

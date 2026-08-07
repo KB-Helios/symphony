@@ -61,24 +61,29 @@ defmodule SymphonyElixir.Workflow do
   end
 
   defp parse(content) do
-    {front_matter_lines, prompt_lines} = split_front_matter(content)
+    try do
+      {front_matter_lines, prompt_lines} = split_front_matter(content)
 
-    case front_matter_yaml_to_map(front_matter_lines) do
-      {:ok, front_matter} ->
-        prompt = Enum.join(prompt_lines, "\n") |> String.trim()
+      case front_matter_yaml_to_map(front_matter_lines) do
+        {:ok, front_matter} ->
+          prompt = Enum.join(prompt_lines, "\n") |> String.trim()
 
-        {:ok,
-         %{
-           config: front_matter,
-           prompt: prompt,
-           prompt_template: prompt
-         }}
+          {:ok,
+           %{
+             config: front_matter,
+             prompt: prompt,
+             prompt_template: prompt
+           }}
 
-      {:error, :workflow_front_matter_not_a_map} ->
-        {:error, :workflow_front_matter_not_a_map}
+        {:error, :workflow_front_matter_not_a_map} ->
+          {:error, :workflow_front_matter_not_a_map}
 
-      {:error, reason} ->
-        {:error, {:workflow_parse_error, reason}}
+        {:error, reason} ->
+          {:error, {:workflow_parse_error, reason}}
+      end
+    catch
+      :throw, {:unterminated_front_matter, raw} ->
+        {:error, {:workflow_parse_error, {:unterminated_front_matter, raw}}}
     end
   end
 
@@ -91,7 +96,7 @@ defmodule SymphonyElixir.Workflow do
 
         case rest do
           ["---" | prompt_lines] -> {front, prompt_lines}
-          _ -> {front, []}
+          _ -> throw({:unterminated_front_matter, Enum.join(tail, "\n")})
         end
 
       _ ->

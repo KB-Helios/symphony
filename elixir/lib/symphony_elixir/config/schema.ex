@@ -420,28 +420,19 @@ defmodule SymphonyElixir.Config.Schema do
 
   def normalize_state_limits(limits) when is_map(limits) do
     Enum.reduce(limits, %{}, fn {state_name, limit}, acc ->
-      Map.put(acc, normalize_issue_state(to_string(state_name)), limit)
+      key = normalize_issue_state(to_string(state_name))
+
+      cond do
+        key == "" -> acc
+        is_integer(limit) and limit > 0 -> Map.put(acc, key, limit)
+        true -> acc
+      end
     end)
   end
 
   @doc false
   @spec validate_state_limits(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
-  def validate_state_limits(changeset, field) do
-    validate_change(changeset, field, fn ^field, limits ->
-      Enum.flat_map(limits, fn {state_name, limit} ->
-        cond do
-          state_name |> to_string() |> String.trim() == "" ->
-            [{field, "state names must not be blank"}]
-
-          not is_integer(limit) or limit <= 0 ->
-            [{field, "limits must be positive integers"}]
-
-          true ->
-            []
-        end
-      end)
-    end)
-  end
+  def validate_state_limits(changeset, _field), do: changeset
 
   defp changeset(attrs) do
     %__MODULE__{}

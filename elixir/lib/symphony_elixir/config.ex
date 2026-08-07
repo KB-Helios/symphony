@@ -74,8 +74,8 @@ defmodule SymphonyElixir.Config do
       {:ok, %{prompt_template: prompt}} ->
         if String.trim(prompt) == "", do: @default_prompt_template, else: prompt
 
-      _ ->
-        @default_prompt_template
+      {:error, reason} ->
+        raise ArgumentError, message: format_config_error(reason)
     end
   end
 
