@@ -408,6 +408,12 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  @spec reconcile_stalled_running_issues_for_test(term()) :: term()
+  def reconcile_stalled_running_issues_for_test(%State{} = state) do
+    reconcile_stalled_running_issues(state)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -579,6 +585,27 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  defp terminate_running_issue_keep_claimed(%State{} = state, issue_id) do
+    case Map.get(state.running, issue_id) do
+      nil ->
+        state
+
+      %{pid: pid, ref: ref} = running_entry ->
+        state = record_session_completion_totals(state, running_entry)
+        stop_running_task(pid, ref, state.task_supervisor)
+
+        %{
+          state
+          | running: Map.delete(state.running, issue_id),
+            blocked: Map.delete(state.blocked, issue_id),
+            retry_attempts: Map.delete(state.retry_attempts, issue_id)
+        }
+
+      _ ->
+        %{state | running: Map.delete(state.running, issue_id)}
+    end
+  end
+
   defp reconcile_stalled_running_issues(%State{} = state) do
     timeout_ms = Config.settings!().codex.stall_timeout_ms
 
@@ -627,7 +654,7 @@ defmodule SymphonyElixir.Orchestrator do
         next_attempt = next_retry_attempt_from_running(running_entry)
 
         state
-        |> terminate_running_issue(issue_id, false)
+        |> terminate_running_issue_keep_claimed(issue_id)
         |> schedule_issue_retry(issue_id, next_attempt, %{
           identifier: identifier,
           issue_url: running_entry.issue.url,
