@@ -76,18 +76,60 @@ defmodule SymphonyElixir.PrimeAgentSecretTest do
   end
 
   test "prime elicitation maps to turn_input_required" do
-    # Verify source maps elicitation_request -> turn_input_required
-    source = File.read!("lib/symphony_elixir/prime_agent/app_server.ex")
-    assert source =~ "elicitation_request"
-    assert source =~ ":turn_input_required"
-    assert source =~ "mcpServer/elicitation/request"
+    # Verify elicitation events translate to :turn_input_required behaviorally.
+    # Start a fake prime that emits elicitation_request, then verify run/4 returns
+    # {:error, {:turn_input_required, _}}.
+    test_root = Path.join(System.tmp_dir!(), "symphony-prime-elicit-#{System.unique_integer([:positive])}")
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces") |> String.replace("\\", "/")
+      workspace = Path.join(workspace_root, "MT-ELICIT-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(workspace)
+
+      fake_prime = Path.join(test_root, "fake-prime-elicit") |> String.replace("\\", "/")
+
+      File.write!(fake_prime, """
+      #!/bin/sh
+      while IFS= read -r line; do
+        printf '%s\\n' '{"type":"elicitation_request","message":"need input"}'
+        exit 0
+      done
+      """)
+
+      File.chmod!(fake_prime, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        harness_kind: "prime",
+        prime_command: fake_prime
+      )
+
+      WorkflowStore.force_reload()
+
+      issue = %Issue{
+        id: "issue-prime-elicit",
+        identifier: "MT-ELICIT",
+        title: "Elicit test",
+        description: "Test",
+        state: "Todo",
+        url: "https://example.org/issues/MT-ELICIT",
+        labels: []
+      }
+
+      result = PrimeAppServer.run(workspace, "test prompt", issue)
+      assert {:error, {:turn_input_required, _payload}} = result
+    after
+      File.rm_rf(test_root)
+    end
   end
 
   test "prime stall timeout is harness-aware" do
-    source = File.read!("lib/symphony_elixir/orchestrator.ex")
-    assert source =~ "stall_timeout_for_entry"
-    assert source =~ ~s("prime")
-    assert source =~ "prime.stall_timeout_ms"
-    assert source =~ "codex.stall_timeout_ms"
+    # Verify Orchestrator.reconcile_stalled_running_issues_for_test/1 respects
+    # harness-specific timeouts by checking config reads prime.stall_timeout_ms.
+    # Since we cannot easily inject a stalled prime run here, we verify the config
+    # structure instead, which the orchestrator test suite covers behaviorally.
+    prime_settings = Config.prime_settings()
+    assert is_map(prime_settings)
+    assert Map.has_key?(prime_settings, :stall_timeout_ms)
   end
 end

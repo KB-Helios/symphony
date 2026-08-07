@@ -111,6 +111,7 @@ defmodule SymphonyElixirWeb.Layouts do
             <span class="text-sm font-semibold tracking-tight">Symphony</span>
             <div class="relative ml-2 inline-flex md:hidden">
               <select
+                aria-label="Navigate"
                 onchange="window.location.href = this.value"
                 class="h-8 appearance-none rounded-lg border border-border bg-card px-3 pr-7 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >

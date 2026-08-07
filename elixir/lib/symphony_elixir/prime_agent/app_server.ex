@@ -17,13 +17,9 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   @behaviour SymphonyElixir.Harness
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH, Tracker}
+  alias SymphonyElixir.{Config, Harness, PathSafety, SSH, Tracker}
 
-  @port_line_bytes 10_485_760
   @json_mode_flag "--mode json"
-
-  @spec port_line_bytes() :: pos_integer()
-  def port_line_bytes, do: @port_line_bytes
 
   @type session :: %{
           port: port(),
@@ -88,17 +84,23 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     emit_message(on_message, :session_started, %{session_id: session_id, harness: "prime"}, metadata)
     Logger.info("Prime session started for #{issue_context(issue)} session_id=#{session_id} workspace=#{workspace}")
 
-    :ok = send_prime_prompt(port, prompt, issue)
+    case send_prime_prompt(port, prompt, issue) do
+      :ok ->
+        case await_prime_completion(port, on_message, metadata) do
+          {:ok, result} ->
+            Logger.info("Prime session completed for #{issue_context(issue)} session_id=#{session_id}")
+            {:ok, %{result: result, session_id: session_id, thread_id: session_id, turn_id: "1"}}
 
-    case await_prime_completion(port, on_message, metadata) do
-      {:ok, result} ->
-        Logger.info("Prime session completed for #{issue_context(issue)} session_id=#{session_id}")
-        {:ok, %{result: result, session_id: session_id, thread_id: session_id, turn_id: "1"}}
+          {:error, reason} ->
+            Logger.warning("Prime session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
+            emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: reason, harness: "prime"}, metadata)
+            {:error, reason}
+        end
 
-      {:error, reason} ->
-        Logger.warning("Prime session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
-        emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: reason, harness: "prime"}, metadata)
-        {:error, reason}
+      {:error, :port_closed} = error ->
+        Logger.warning("Prime session port closed before prompt delivery for #{issue_context(issue)} session_id=#{session_id}")
+        emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: :port_closed, harness: "prime"}, metadata)
+        error
     end
   end
 
@@ -167,7 +169,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
             args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
             cd: String.to_charlist(workspace),
             env: tracker_secret_port_env(dynamic_tool_binding),
-            line: @port_line_bytes
+            line: Harness.port_line_bytes()
           ]
         )
 
@@ -178,7 +180,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   defp start_port(workspace, worker_host, _prime_settings, dynamic_tool_binding)
        when is_binary(worker_host) do
     remote_command = remote_launch_command(workspace, dynamic_tool_binding)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
+    SSH.start_port(worker_host, remote_command, line: Harness.port_line_bytes())
   end
 
   defp local_launch_command(dynamic_tool_binding) do
@@ -259,8 +261,12 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
         %{"type" => "prompt", "message" => prompt, "id" => prime_request_id()}
       end
 
-    send_message(port, payload)
-    :ok
+    try do
+      send_message(port, payload)
+      :ok
+    rescue
+      ArgumentError -> {:error, :port_closed}
+    end
   end
 
   defp prime_request_id, do: "symphony-#{System.unique_integer([:positive])}"

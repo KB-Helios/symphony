@@ -4,16 +4,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, Harness, PathSafety, SSH}
 
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
-  @port_line_bytes 10_485_760
   @max_stream_log_bytes 1_000
-
-  @spec port_line_bytes() :: pos_integer()
-  def port_line_bytes, do: @port_line_bytes
 
   @type session :: %{
           port: port(),
@@ -213,7 +209,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
             cd: String.to_charlist(workspace),
             env: tracker_secret_port_env(dynamic_tool_binding),
-            line: @port_line_bytes
+            line: Harness.port_line_bytes()
           ]
         )
 

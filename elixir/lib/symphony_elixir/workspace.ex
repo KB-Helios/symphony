@@ -149,7 +149,13 @@ defmodule SymphonyElixir.Workspace do
   end
 
   def remove_recorded(workspace, worker_host) when is_binary(workspace) and is_binary(worker_host) do
-    remove(workspace, worker_host)
+    case validate_workspace_path(workspace, worker_host) do
+      :ok ->
+        remove(workspace, worker_host)
+
+      {:error, reason} ->
+        {:error, reason, ""}
+    end
   end
 
   def remove_recorded(workspace, _worker_host) do

@@ -260,7 +260,7 @@ codex:
   `GET /repos/{owner/repo}/issues/{number}` (IDs are numeric strings, `>0`), deduplicated, with `404`
   omissions. Empty state/ID lists return `{:ok, []}` without a GitHub request.
 - Identity and normalization: `issue.id` is `Integer.to_string(number)`, `issue.identifier` is
-  `GH-<number>`, `issue.native_ref` is `%{"id","node_id","number","repo"}` filtered to non-nil or
+  `GH-<number>`, `issue.native_ref` is `%{"id" => ..., "node_id" => ..., "number" => ..., "repo" => ...}` filtered to non-nil or
   `nil`. Records missing nonblank `number`/`title`/`state` are `nil`; priority is always `nil`;
   `branch_name` is `nil`; `description` is `body`; `url` is `html_url`; `assignee_id` is
   `assignee.login`; RFC 3339 `created_at`/`updated_at` parsed else `nil`; labels trimmed,
@@ -276,6 +276,7 @@ codex:
   `path` must be a relative path starting with `/` without `://`. Symphony executes host-side with the
   session-bound token/URL, strips `GITHUB_TOKEN` and configured `$VAR` names from the Codex child, and
   does not scope raw tool calls to the configured repo. Mutations are provider-native; workflows own idempotency.
+  **Restriction**: `github_api`, `jira_rest`, `asana_api`, and `gitlab_api` are restricted to trusted workflows.
 - Responsibility and errors: `github_api` adds no retry, scope guard, or rate-limit policy. Read/config failures use
   `{:error, :missing_github_repo}`, `{:error, :invalid_github_repo}`, `{:error, :missing_github_token}`,
   `{:error, :invalid_github_api_url}`, `{:error, :invalid_github_issue_id}`,
@@ -310,14 +311,13 @@ codex:
   from `notes` or ADF (`text`/`hardBreak`/panel/mention/emoji/status/inlineCard attrs) blank→`nil`; `url` is
   `base_url/browse/<key>`; `assignee_id` is `assignee.accountId`; labels trimmed/lowercased/deduped;
   RFC 3339 `created`/`updated` (`+0000`→`+00:00` normalized) else `nil`. Blockers are inward `Blocks`
-  links → `%{id,identifier,state}` with `state` from `fields.status.name`. State keeps Jira spelling.
+  links → `%{id: ..., identifier: ..., state: ...}` with `state` from `fields.status.name`. State keeps Jira spelling.
 - Dispatchability: when `status.statusCategory.key` is present, only `new` gates on blockers; otherwise
   `Todo`/`To Do` gates. Gated issues are dispatchable only when every blocker state is in configured
   `terminal_states` (`trim+downcase`). Otherwise `dispatchable` is `true`. The scheduler then applies the generic rules.
 - Malformed handling: candidate pages drop `nil` records with a warning and filter to requested states
-  (`trim+downcase`); ID refresh returns `{:error, :jira_unknown_payload}` for malformed/out-of-scope
-  requested records or missing `id`/`fields` structure. Omitted IDs (not requested / wrong project / 404-like)
-  are simply omitted.
+  (`trim+downcase`); ID refresh omits requested records from another project while returning `{:error, :jira_unknown_payload}`
+  for malformed payloads or missing `id`/`fields` structure. Not-found IDs (404-like) are omitted from results.
 - Tool: `jira_rest` with schema `{"method":"GET|POST|PUT|DELETE","path":"/rest/api/3/…","query"?:object,"body"?:any}`.
   Path must start with `/rest/api/3/` without `://`. Executed host-side with Basic `email:api_token`, stripping
   `JIRA_API_TOKEN` + `$VAR` from the Codex child. Raw tool calls are not limited to the configured project.
@@ -343,7 +343,7 @@ codex:
   ID refresh is `GET /tasks/{gid}?opt_fields=…` per ID, `404` omitted, tasks lacking the configured
   project membership omitted. Empty lists return `{:ok, []}` without a request; trimmed `project_gid`/`api_key` used.
 - Identity and normalization: `issue.id` is `gid`, `issue.identifier` is `ASANA-<gid>`,
-  `issue.native_ref` is `%{"task_gid","project_gid","section_gid"}` filtered. `state` is the section
+  `issue.native_ref` is `%{"task_gid" => ..., "project_gid" => ..., "section_gid" => ...}` filtered. `state` is the section
   `name` from the matching `memberships` entry (missing→`nil` and record dropped). Records missing
   nonblank `gid`/`name`/`state` are `nil`; `priority`/`branch_name` are `nil`; `description` is `notes`
   blank→`nil`; `assignee_id` is `assignee.gid`; labels from `tags[].name` trimmed/lowercased/deduped;
@@ -371,7 +371,7 @@ codex:
   ID refresh is per-IID `GET /projects/{encoded}/issues/{iid}` (numeric `>0`), deduped, `404` omitted.
   Empty lists return `{:ok, []}` without a request.
 - Identity and normalization: `issue.id` is `Integer.to_string(iid)`, `issue.identifier` is `GL-<iid>`,
-  `issue.native_ref` is `%{"id","iid","project_id","project_path","references"}` filtered. Records missing
+  `issue.native_ref` is `%{"id" => ..., "iid" => ..., "project_id" => ..., "project_path" => ..., "references" => ...}` filtered. Records missing
   `iid>0`/nonblank `title`/`state` are `nil`; `priority`/`branch_name`/`blocked_by` are `nil`/`nil`/`[]`;
   `description` is blank→`nil` from `description`; `assignee_id` prefers `assignees[0].id`→string else
   `assignee.id`→string else `username`; labels trimmed/lowercased/deduped; timestamps RFC 3339 else `nil`;

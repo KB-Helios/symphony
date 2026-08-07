@@ -82,8 +82,8 @@ defmodule SymphonyElixir.Workflow do
           {:error, {:workflow_parse_error, reason}}
       end
     catch
-      :throw, {:unterminated_front_matter, raw} ->
-        {:error, {:workflow_parse_error, {:unterminated_front_matter, raw}}}
+      :throw, {:unterminated_front_matter, _raw} ->
+        {:error, {:workflow_parse_error, :unterminated_front_matter}}
     end
   end
 
@@ -96,7 +96,7 @@ defmodule SymphonyElixir.Workflow do
 
         case rest do
           ["---" | prompt_lines] -> {front, prompt_lines}
-          _ -> throw({:unterminated_front_matter, Enum.join(tail, "\n")})
+          _ -> throw({:unterminated_front_matter, :redacted})
         end
 
       _ ->

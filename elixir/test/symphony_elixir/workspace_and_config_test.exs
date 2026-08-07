@@ -1133,7 +1133,18 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       max_concurrent_agents_by_state: %{"Todo" => "1", "Review" => 0, "Done" => "bad"}
     )
 
-    assert :ok = Config.validate!()
+    import ExUnit.CaptureLog
+
+    log =
+      capture_log(fn ->
+        assert :ok = Config.validate!()
+      end)
+
+    assert log =~ "Discarding malformed state limit entry"
+    assert log =~ "invalid limit \"1\""
+    assert log =~ "invalid limit 0"
+    assert log =~ "invalid limit \"bad\""
+
     assert Config.settings!().agent.max_concurrent_agents_by_state == %{}
     assert Config.max_concurrent_agents_for_state("Todo") == 10
 
@@ -1363,20 +1374,6 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              "todo" => 1,
              "in progress" => 2
            }
-
-    changeset =
-      {%{}, %{limits: :map}}
-      |> Changeset.cast(%{limits: %{"" => 1, "todo" => 0}}, [:limits])
-      |> Schema.validate_state_limits(:limits)
-
-    assert changeset.errors == []
-
-    whitespace_state_changeset =
-      {%{}, %{limits: :map}}
-      |> Changeset.cast(%{limits: %{"   " => 1}}, [:limits])
-      |> Schema.validate_state_limits(:limits)
-
-    assert whitespace_state_changeset.errors == []
   end
 
   test "schema parse normalizes policy keys and env-backed fallbacks" do
