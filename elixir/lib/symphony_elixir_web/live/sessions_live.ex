@@ -61,7 +61,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
               <div>
                 <.card_title class="text-[15px] font-semibold">All sessions</.card_title>
                 <.card_description class="text-xs">
-                  <%= total(@payload) %> tracked issue(s) · newest first
+                  <%= total(@payload) %> tracked issue(s) · grouped by status
                 </.card_description>
               </div>
               <.link
@@ -116,9 +116,13 @@ defmodule SymphonyElixirWeb.SessionsLive do
                       <.table_cell><.status_badge status={row.status} /></.table_cell>
                       <.table_cell class="text-sm"><%= row.state || "—" %></.table_cell>
                       <.table_cell>
-                        <span class="inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium uppercase tracking-wide">
-                          <%= row.harness || "codex" %>
-                        </span>
+                        <%= if row.harness do %>
+                          <span class="inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium uppercase tracking-wide">
+                            <%= row.harness %>
+                          </span>
+                        <% else %>
+                          <span class="text-xs text-muted-foreground">—</span>
+                        <% end %>
                       </.table_cell>
                       <.table_cell class="max-w-[28rem] truncate text-sm text-muted-foreground">
                         <%= row.detail %>
@@ -161,31 +165,16 @@ defmodule SymphonyElixirWeb.SessionsLive do
     """
   end
 
-  attr(:status, :string, required: true)
-
-  defp status_badge(assigns) do
-    variant =
-      case assigns.status do
-        "running" -> "default"
-        "blocked" -> "destructive"
-        "retrying" -> "secondary"
-        _ -> "outline"
-      end
-
-    assigns = assign(assigns, :variant, variant)
-
-    ~H"""
-    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize"><%= @status %></.badge>
-    """
-  end
-
   defp total(payload) do
-    length(payload.running) + length(payload.blocked) + length(payload.retrying)
+    running = Map.get(payload, :running, [])
+    blocked = Map.get(payload, :blocked, [])
+    retrying = Map.get(payload, :retrying, [])
+    length(running) + length(blocked) + length(retrying)
   end
 
   defp rows(payload) do
     running =
-      Enum.map(payload.running, fn e ->
+      Enum.map(Map.get(payload, :running, []), fn e ->
         %{
           identifier: e.issue_identifier,
           status: "running",
@@ -196,7 +185,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
       end)
 
     blocked =
-      Enum.map(payload.blocked, fn e ->
+      Enum.map(Map.get(payload, :blocked, []), fn e ->
         %{
           identifier: e.issue_identifier,
           status: "blocked",
@@ -207,7 +196,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
       end)
 
     retrying =
-      Enum.map(payload.retrying, fn e ->
+      Enum.map(Map.get(payload, :retrying, []), fn e ->
         %{
           identifier: e.issue_identifier,
           status: "retrying",
@@ -221,14 +210,6 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   defp load_payload do
-    Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
-  end
-
-  defp orchestrator do
-    Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
-  end
-
-  defp snapshot_timeout_ms do
-    Endpoint.config(:snapshot_timeout_ms) || 15_000
+    Presenter.state_payload(SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
   end
 end

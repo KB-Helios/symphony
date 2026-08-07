@@ -79,4 +79,20 @@ defmodule SymphonyElixirWeb do
   defmacro __using__(which) when is_atom(which) do
     apply(__MODULE__, which, [])
   end
+
+  @doc """
+  Returns the configured orchestrator module, defaulting to SymphonyElixir.Orchestrator.
+  """
+  @spec orchestrator() :: module()
+  def orchestrator do
+    SymphonyElixirWeb.Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
+  end
+
+  @doc """
+  Returns the configured snapshot timeout in milliseconds, defaulting to 15_000.
+  """
+  @spec snapshot_timeout_ms() :: non_neg_integer()
+  def snapshot_timeout_ms do
+    SymphonyElixirWeb.Endpoint.config(:snapshot_timeout_ms) || 15_000
+  end
 end

@@ -474,7 +474,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:harness, :string, default: nil)
 
   defp harness_badge(assigns) do
-    label = if assigns.harness == "prime", do: "prime", else: "codex"
+    label = assigns.harness || "codex"
     variant = if assigns.harness == "prime", do: "secondary", else: "outline"
     assigns = assigns |> assign(:label, label) |> assign(:variant, variant)
 
@@ -509,15 +509,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   # ---- data / formatting helpers ----
 
   defp load_payload do
-    Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
-  end
-
-  defp orchestrator do
-    Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
-  end
-
-  defp snapshot_timeout_ms do
-    Endpoint.config(:snapshot_timeout_ms) || 15_000
+    Presenter.state_payload(SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
   end
 
   defp external_issue_url(url) when is_binary(url) do
@@ -548,7 +540,8 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp format_runtime_and_turns(started_at, turn_count, now)
        when is_integer(turn_count) and turn_count > 0 do
-    "#{format_runtime_seconds(runtime_seconds_from_started_at(started_at, now))} · #{turn_count} turns"
+    turn_label = if turn_count == 1, do: "turn", else: "turns"
+    "#{format_runtime_seconds(runtime_seconds_from_started_at(started_at, now))} · #{turn_count} #{turn_label}"
   end
 
   defp format_runtime_and_turns(started_at, _turn_count, now),

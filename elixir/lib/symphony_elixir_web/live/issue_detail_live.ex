@@ -188,24 +188,6 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
     """
   end
 
-  attr(:status, :string, required: true)
-
-  defp status_badge(assigns) do
-    variant =
-      case assigns.status do
-        "running" -> "default"
-        "blocked" -> "destructive"
-        "retrying" -> "secondary"
-        _ -> "outline"
-      end
-
-    assigns = assign(assigns, :variant, variant)
-
-    ~H"""
-    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize"><%= @status %></.badge>
-    """
-  end
-
   attr(:label, :string, required: true)
   attr(:value, :string, required: true)
   attr(:mono, :boolean, default: false)
@@ -226,14 +208,6 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   end
 
   defp load_issue(identifier) do
-    Presenter.issue_payload(identifier, orchestrator(), snapshot_timeout_ms())
-  end
-
-  defp orchestrator do
-    Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
-  end
-
-  defp snapshot_timeout_ms do
-    Endpoint.config(:snapshot_timeout_ms) || 15_000
+    Presenter.issue_payload(identifier, SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
   end
 end
