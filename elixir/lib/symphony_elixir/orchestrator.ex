@@ -607,23 +607,25 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp reconcile_stalled_running_issues(%State{} = state) do
-    timeout_ms = Config.settings!().codex.stall_timeout_ms
+    if map_size(state.running) == 0 do
+      state
+    else
+      now = DateTime.utc_now()
 
-    cond do
-      timeout_ms <= 0 ->
-        state
+      Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
+        timeout_ms = stall_timeout_for_entry(running_entry)
 
-      map_size(state.running) == 0 ->
-        state
-
-      true ->
-        now = DateTime.utc_now()
-
-        Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
+        if timeout_ms <= 0 do
+          state_acc
+        else
           maybe_restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
-        end)
+        end
+      end)
     end
   end
+
+  defp stall_timeout_for_entry(%{harness: "prime"}), do: Config.settings!().prime.stall_timeout_ms
+  defp stall_timeout_for_entry(_entry), do: Config.settings!().codex.stall_timeout_ms
 
   defp maybe_restart_stalled_issue(state, issue_id, running_entry, now, timeout_ms) do
     if Map.has_key?(state.blocked, issue_id) do
