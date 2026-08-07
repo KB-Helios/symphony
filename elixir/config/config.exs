@@ -1,5 +1,7 @@
 import Config
 
+config :phoenix_live_view, :colocated_js, disable_symlink_warning: true
+
 config :phoenix, :json_library, Jason
 
 config :symphony_elixir, SymphonyElixirWeb.Endpoint,
@@ -19,3 +21,28 @@ if config_env() == :test do
   config :symphony_elixir,
     workflow_file_path: Path.expand("../test/fixtures/startup_workflow.md", __DIR__)
 end
+
+config :tailwind,
+  version: "4.1.12",
+  default: [
+    args: ~w(
+      --input=assets/css/app.css
+      --output=priv/static/assets/app.css
+    ),
+    cd: Path.expand("..", __DIR__)
+  ]
+
+config :esbuild,
+  version: "0.25.4",
+  default: [
+    args: ~w(
+      assets/js/app.js
+      --bundle
+      --target=es2022
+      --outdir=priv/static/assets
+      --external:/fonts/*
+      --external:/images/*
+    ),
+    cd: Path.expand("..", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
