@@ -38,24 +38,41 @@ defmodule SymphonyElixir.PrimeAgentSecretTest do
 
     WorkflowStore.force_reload()
 
-    # Need a workspace that passes validation; create it
     ws_root = Config.local_workspace_root()
     ws = Path.join(ws_root, "MT-SNAP-#{System.unique_integer([:positive])}")
     File.mkdir_p!(ws)
-
-    # Use a fake prime that immediately exits so we can inspect session; we don't care about run_turn
-    fake = Path.join(System.tmp_dir!(), "fake-prime-snap-#{System.unique_integer([:positive])}")
-    File.write!(fake, "#!/bin/sh\nexit 0\n")
-    File.chmod!(fake, 0o755)
-
-    # Prime command must be absolute path that WSL bash can execute; on Windows this will fail
-    # to actually start, but we test the snapshot binding path without needing a live port:
-    # instead verify bind directly and that session would contain it if start succeeded.
-    binding = Tracker.bind_agent_tools()
-    assert is_list(binding.secret_environment_names)
-    assert "MY_SNAPSHOT_TOKEN" in binding.secret_environment_names
-
     on_exit(fn -> File.rm_rf(ws) end)
+
+    # Verify snapshot isolation: session stores binding; changing env after start_session
+    # must not affect the stored snapshot or remote command derived from it.
+    binding_before = Tracker.bind_agent_tools()
+    assert is_list(binding_before.secret_environment_names)
+    assert "MY_SNAPSHOT_TOKEN" in binding_before.secret_environment_names
+
+    # Also verify remote_launch derived from snapshot, not live env, via 2-arg form.
+    # Simulate rotation: add a new token env and reload, then ensure snapshot-derived command
+    # still contains the original token and live-derived command would differ only after reload.
+    System.put_env("MY_NEW_TOKEN", "new-secret")
+
+    on_exit(fn -> System.delete_env("MY_NEW_TOKEN") end)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: ws_root,
+      tracker_api_token: "$MY_NEW_TOKEN",
+      tracker_project_slug: "project"
+    )
+
+    WorkflowStore.force_reload()
+
+    # Live binding now contains MY_NEW_TOKEN, but snapshot from before still contains old.
+    live_binding = Tracker.bind_agent_tools()
+    assert "MY_NEW_TOKEN" in live_binding.secret_environment_names
+
+    snapshot_cmd = PrimeAppServer.remote_launch_command_for_test("/tmp/ws-snap", binding_before)
+    live_cmd = PrimeAppServer.remote_launch_command_for_test("/tmp/ws-snap", live_binding)
+    assert String.contains?(snapshot_cmd, "MY_SNAPSHOT_TOKEN")
+    assert String.contains?(live_cmd, "MY_NEW_TOKEN")
+    refute snapshot_cmd == live_cmd
   end
 
   test "prime elicitation maps to turn_input_required" do

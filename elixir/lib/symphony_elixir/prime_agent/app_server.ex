@@ -208,7 +208,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   end
 
   defp valid_environment_names(names) do
-    Enum.filter(names, fn name ->
+    Enum.filter(names || [], fn name ->
       is_binary(name) and String.match?(name, ~r/^[A-Za-z_][A-Za-z0-9_]*$/)
     end)
   end
@@ -217,6 +217,12 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   @spec remote_launch_command_for_test(Path.t()) :: String.t()
   def remote_launch_command_for_test(workspace) when is_binary(workspace) do
     binding = Tracker.bind_agent_tools()
+    remote_launch_command(workspace, binding)
+  end
+
+  @spec remote_launch_command_for_test(Path.t(), map()) :: String.t()
+  def remote_launch_command_for_test(workspace, binding)
+      when is_binary(workspace) and is_map(binding) do
     remote_launch_command(workspace, binding)
   end
 
