@@ -5,20 +5,29 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   use SymphonyElixirWeb, :live_view
 
-  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
-  @runtime_tick_ms 1_000
+  alias SymphonyElixirWeb.{ObservabilityPubSub, Presenter}
+
+  @table_header_cell_class "h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide"
 
   @impl true
   def mount(_params, _session, socket) do
+    payload = load_payload()
+    q = ""
+    harness_filter = "all"
+
     socket =
       socket
-      |> assign(:payload, load_payload())
+      |> assign(:payload, payload)
       |> assign(:now, DateTime.utc_now())
+      |> assign(:q, q)
+      |> assign(:harness_filter, harness_filter)
+      |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
+      |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
+      |> assign(:filtered_retrying, filtered_retrying(payload, q))
       |> assign(:current_path, "/")
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
-      schedule_runtime_tick()
     end
 
     {:ok, socket}
@@ -29,12 +38,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
     normalized = harness |> to_string() |> String.trim() |> String.downcase()
 
     case normalized do
-      kind when kind in ["codex", "prime"] ->
+      kind when kind in SymphonyElixir.Harness.supported_harnesses() ->
         case update_workflow_harness(kind) do
           :ok ->
+            payload = load_payload()
+
             {:noreply,
              socket
-             |> assign(:payload, load_payload())
+             |> assign(:payload, payload)
+             |> assign(:filtered_running, filtered_running(payload, socket.assigns.q, socket.assigns.harness_filter))
+             |> assign(:filtered_blocked, filtered_blocked(payload, socket.assigns.q, socket.assigns.harness_filter))
+             |> assign(:filtered_retrying, filtered_retrying(payload, socket.assigns.q))
              |> put_flash(:info, "Harness set to #{kind} for next dispatches.")}
 
           {:error, reason} ->
@@ -49,17 +63,72 @@ defmodule SymphonyElixirWeb.DashboardLive do
   def handle_event("select_harness", _params, socket), do: {:noreply, socket}
 
   @impl true
-  def handle_info(:runtime_tick, socket) do
-    schedule_runtime_tick()
-    {:noreply, assign(socket, :now, DateTime.utc_now())}
+  def handle_event("search", %{"q" => q}, socket) do
+    q = q |> to_string() |> String.trim() |> String.slice(0, 120)
+    payload = socket.assigns.payload
+    harness_filter = socket.assigns.harness_filter
+
+    {:noreply,
+     socket
+     |> assign(:q, q)
+     |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
+     |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
+     |> assign(:filtered_retrying, filtered_retrying(payload, q))}
+  end
+
+  def handle_event("search", _params, socket), do: {:noreply, socket}
+
+  @impl true
+  def handle_event("filter", %{"harness" => harness}, socket) do
+    normalized = harness |> to_string() |> String.trim() |> String.downcase()
+    harness_filter = if normalized in SymphonyElixir.Harness.supported_harnesses(), do: normalized, else: "all"
+    payload = socket.assigns.payload
+    q = socket.assigns.q
+
+    {:noreply,
+     socket
+     |> assign(:harness_filter, harness_filter)
+     |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
+     |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
+     |> assign(:filtered_retrying, filtered_retrying(payload, q))}
+  end
+
+  def handle_event("filter", _params, socket) do
+    payload = socket.assigns.payload
+    q = socket.assigns.q
+
+    {:noreply,
+     socket
+     |> assign(:harness_filter, "all")
+     |> assign(:filtered_running, filtered_running(payload, q, "all"))
+     |> assign(:filtered_blocked, filtered_blocked(payload, q, "all"))
+     |> assign(:filtered_retrying, filtered_retrying(payload, q))}
+  end
+
+  @impl true
+  def handle_event("refresh", _params, socket) do
+    case Presenter.refresh_payload(orchestrator()) do
+      {:ok, _payload} ->
+        {:noreply, put_flash(socket, :info, "Refresh requested")}
+
+      {:error, :unavailable} ->
+        {:noreply, put_flash(socket, :error, "Orchestrator unavailable")}
+    end
   end
 
   @impl true
   def handle_info(:observability_updated, socket) do
+    payload = load_payload()
+    q = socket.assigns.q
+    harness_filter = socket.assigns.harness_filter
+
     {:noreply,
      socket
-     |> assign(:payload, load_payload())
-     |> assign(:now, DateTime.utc_now())}
+     |> assign(:payload, payload)
+     |> assign(:now, DateTime.utc_now())
+     |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
+     |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
+     |> assign(:filtered_retrying, filtered_retrying(payload, q))}
   end
 
   @impl true
@@ -76,16 +145,28 @@ defmodule SymphonyElixirWeb.DashboardLive do
         </:actions>
       </.header>
 
-      <%= if @payload[:error] do %>
-        <.alert variant="destructive" class="card-elevated">
-          <.icon name="hero-exclamation-triangle" class="h-4 w-4" />
-          <.alert_title>Snapshot unavailable</.alert_title>
-          <.alert_description>
-            <span class="font-medium"><%= @payload.error.code %>:</span> <%= @payload.error.message %>
-          </.alert_description>
-        </.alert>
+      <%= if is_nil(@payload) do %>
+        <div role="status" aria-busy="true" aria-label="Loading dashboard" class="space-y-4">
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div :for={_ <- 1..5} class="h-24 animate-pulse rounded-xl bg-muted/40"></div>
+          </div>
+          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+        </div>
       <% else %>
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <%= if @payload[:error] do %>
+          <.alert variant="destructive" class="card-elevated">
+            <.icon name="hero-exclamation-triangle" class="h-4 w-4" />
+            <.alert_title>Snapshot unavailable</.alert_title>
+            <.alert_description>
+              <span class="font-medium"><%= @payload.error.code %>:</span> <%= @payload.error.message %>
+            </.alert_description>
+          </.alert>
+        <% else %>
+          <.toolbar q={@q} harness_filter={@harness_filter} />
+
+          <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <.metric_card
             label="Running"
             value={@payload.counts.running}
@@ -114,13 +195,30 @@ defmodule SymphonyElixirWeb.DashboardLive do
             icon="hero-cpu-chip"
             accent="zinc"
           />
-          <.metric_card
-            label="Runtime"
-            value={format_runtime_seconds(total_runtime_seconds(@payload, @now))}
-            detail="Total Codex runtime"
-            icon="hero-timer"
-            accent="zinc"
-          />
+          <.card class="card-elevated overflow-hidden">
+            <.card_header class="pb-2">
+              <div class="flex items-center justify-between gap-2">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Runtime
+                </p>
+                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border">
+                  <.icon name="hero-timer" class="h-3.5 w-3.5" />
+                </span>
+              </div>
+            </.card_header>
+            <.card_content>
+              <p
+                id="total-runtime"
+                phx-hook="RuntimeClock"
+                data-completed-seconds={completed_runtime_seconds(@payload)}
+                data-started-ats={Jason.encode!(Enum.map(@payload.running, & &1.started_at) |> Enum.reject(&is_nil/1))}
+                class="numeric text-[26px] font-semibold tracking-tight leading-none"
+              >
+                <%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %>
+              </p>
+              <p class="mt-2 text-xs leading-relaxed text-muted-foreground">Total Codex runtime</p>
+            </.card_content>
+          </.card>
         </div>
 
         <div class="grid gap-4 lg:grid-cols-5">
@@ -146,8 +244,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   name="harness"
                   class="flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
-                  <option value="codex" selected={@payload[:harness] == "codex"}>Codex — default</option>
-                  <option value="prime" selected={@payload[:harness] == "prime"}>Prime Agent</option>
+                  <option :for={{value, label} <- harness_select_options()} value={value} selected={@payload[:harness] == value}><%= label %></option>
                 </select>
                 <p class="mt-2 text-xs text-muted-foreground">
                   Current: <span class="font-medium text-foreground"><%= @payload[:harness] || "codex" %></span>
@@ -169,7 +266,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </div>
             </.card_header>
             <.card_content>
-              <pre class="mono max-h-36 overflow-auto rounded-xl border border-border bg-muted/60 p-4 text-xs leading-relaxed"><%= pretty_value(@payload.rate_limits) %></pre>
+              <.rate_limits_content rate_limits={@payload.rate_limits} />
             </.card_content>
           </.card>
         </div>
@@ -177,22 +274,21 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <.sessions_card
           title="Running sessions"
           description="Active issues, last known agent activity, and token usage."
-          entries={@payload.running}
-          empty="No active sessions — the runtime is idle."
-          now={@now}
+          entries={@filtered_running}
+          empty={if @q != "" or @harness_filter != "all", do: "No sessions match the current filter.", else: "No active sessions — the runtime is idle."}
           kind={:running}
         />
 
         <.sessions_card
           title="Blocked sessions"
           description="Issues paused because the agent requested operator input or approval."
-          entries={@payload.blocked}
-          empty="No blocked sessions."
-          now={@now}
+          entries={@filtered_blocked}
+          empty={if @q != "" or @harness_filter != "all", do: "No blocked sessions match the filter.", else: "No blocked sessions."}
           kind={:blocked}
         />
 
-        <.retry_card entries={@payload.retrying} />
+        <.retry_card entries={@filtered_retrying} empty_q={@q} />
+        <% end %>
       <% end %>
     </div>
     """
@@ -212,6 +308,92 @@ defmodule SymphonyElixirWeb.DashboardLive do
       <span class="[data-phx-main:not(.phx-connected)_&]:hidden">Live</span>
       <span class="hidden [data-phx-main:not(.phx-connected)_&]:inline">Offline</span>
     </span>
+    """
+  end
+
+  attr(:q, :string, required: true)
+  attr(:harness_filter, :string, required: true)
+
+  defp toolbar(assigns) do
+    ~H"""
+    <.card class="card-elevated">
+      <.card_content class="flex flex-wrap items-center gap-3 p-3 sm:p-4">
+        <form phx-change="search" class="flex min-w-[220px] flex-1 items-center gap-2">
+          <div class="relative flex-1">
+            <.icon
+              name="hero-magnifying-glass"
+              class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="text"
+              name="q"
+              value={@q}
+              placeholder="Filter by issue…"
+              phx-debounce="300"
+              autocomplete="off"
+              class="flex h-9 w-full rounded-xl border border-input bg-background py-2 pl-9 pr-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            />
+          </div>
+        </form>
+
+        <form phx-change="filter" class="flex items-center gap-2">
+          <label for="toolbar-harness" class="sr-only">Harness filter</label>
+          <select
+            id="toolbar-harness"
+            name="harness"
+            class="flex h-9 items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            <option :for={{value, label} <- harness_filter_options()} value={value} selected={@harness_filter == value}><%= label %></option>
+          </select>
+        </form>
+
+        <.button phx-click="refresh" aria-label="Refresh dashboard" variant="outline" size="sm" class="h-9 rounded-xl px-4 text-sm">
+          <.icon name="hero-arrow-path" class="mr-1.5 h-4 w-4" /> Refresh
+        </.button>
+      </.card_content>
+    </.card>
+    """
+  end
+
+  attr(:rate_limits, :any, required: true)
+
+  defp rate_limits_content(assigns) do
+    ~H"""
+    <%= if is_nil(@rate_limits) or not is_map(@rate_limits) do %>
+      <p class="py-6 text-center text-sm text-muted-foreground">— unavailable</p>
+    <% else %>
+      <% primary = rate_limit_bucket(@rate_limits, ["primary", :primary]) %>
+      <% secondary = rate_limit_bucket(@rate_limits, ["secondary", :secondary]) %>
+      <% credits = rate_limit_bucket(@rate_limits, ["credits", :credits]) %>
+      <% limit_id =
+        Map.get(@rate_limits, "limit_id") || Map.get(@rate_limits, :limit_id) ||
+          Map.get(@rate_limits, "limit_name") || Map.get(@rate_limits, :limit_name) %>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="rounded-xl border border-border bg-muted/30 p-3">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Primary</p>
+          <p class="mt-1.5">
+            <span class="inline-flex rounded-full bg-card px-2.5 py-1 text-xs font-medium ring-1 ring-border">
+              <%= format_rate_limit_bucket(primary) %>
+            </span>
+          </p>
+        </div>
+        <div class="rounded-xl border border-border bg-muted/30 p-3">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Secondary</p>
+          <p class="mt-1.5">
+            <span class="inline-flex rounded-full bg-card px-2.5 py-1 text-xs font-medium ring-1 ring-border">
+              <%= format_rate_limit_bucket(secondary) %>
+            </span>
+          </p>
+        </div>
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/20 px-3 py-2.5">
+        <span class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Credits</span>
+        <span class="inline-flex rounded-full bg-card px-2.5 py-1 text-xs font-medium ring-1 ring-border">
+          <%= format_rate_limit_credits(credits) %>
+        </span>
+        <span :if={limit_id} class="mono ml-auto text-xs text-muted-foreground"><%= limit_id %></span>
+      </div>
+    <% end %>
     """
   end
 
@@ -241,7 +423,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
         </div>
       </.card_header>
       <.card_content>
-        <p class="numeric text-[26px] font-semibold tracking-tight leading-none"><%= @value %></p>
+        <p role="status" aria-live="polite" aria-atomic="true" class="numeric text-[26px] font-semibold tracking-tight leading-none"><%= @value %></p>
         <p :if={@detail} class="mt-2 text-xs leading-relaxed text-muted-foreground"><%= @detail %></p>
       </.card_content>
     </.card>
@@ -252,10 +434,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:description, :string, required: true)
   attr(:entries, :list, required: true)
   attr(:empty, :string, required: true)
-  attr(:now, DateTime, required: true)
   attr(:kind, :atom, required: true)
 
   defp sessions_card(assigns) do
+    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -281,18 +463,19 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <% else %>
           <div class="overflow-x-auto">
             <.table>
+              <.table_caption class="sr-only"><%= @title %> table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <.table_head class="text-[11px] uppercase tracking-wide">Issue</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">State</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Harness</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Session</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide"><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Last update</.table_head>
+                  <th scope="col" class={@table_header_cell_class}>Issue</th>
+                  <th scope="col" class={@table_header_cell_class}>State</th>
+                  <th scope="col" class={@table_header_cell_class}>Harness</th>
+                  <th scope="col" class={@table_header_cell_class}>Session</th>
+                  <th scope="col" class={@table_header_cell_class}><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></th>
+                  <th scope="col" class={@table_header_cell_class}>Last update</th>
                   <%= if @kind == :running do %>
-                    <.table_head class="text-[11px] uppercase tracking-wide">Tokens</.table_head>
+                    <th scope="col" class={@table_header_cell_class}>Tokens</th>
                   <% else %>
-                    <.table_head class="text-[11px] uppercase tracking-wide">Error</.table_head>
+                    <th scope="col" class={@table_header_cell_class}>Error</th>
                   <% end %>
                 </.table_row>
               </.table_header>
@@ -323,6 +506,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                       <.button
                         variant="outline"
                         size="sm"
+                        aria-label={"Copy session ID for #{entry.issue_identifier}"}
                         data-label="Copy ID"
                         data-copy={entry.session_id}
                         phx-hook="ClipboardCopy"
@@ -337,7 +521,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   </.table_cell>
                   <.table_cell class="numeric whitespace-nowrap text-xs">
                     <%= if @kind == :running do %>
-                      <%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %>
+                      <span
+                        id={"runtime-#{entry.issue_identifier}"}
+                        phx-hook="RuntimeClock"
+                        data-started-at={entry.started_at}
+                        data-turn-count={entry.turn_count}
+                      >
+                        <%= format_runtime_and_turns(entry.started_at, entry.turn_count, DateTime.utc_now()) %>
+                      </span>
                     <% else %>
                       <span class="mono"><%= entry.blocked_at || "—" %></span>
                     <% end %>
@@ -379,8 +570,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   attr(:entries, :list, required: true)
+  attr(:empty_q, :string, default: "")
 
   defp retry_card(assigns) do
+    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -397,17 +590,20 @@ defmodule SymphonyElixirWeb.DashboardLive do
       <.card_content class="p-0">
         <%= if @entries == [] do %>
           <div class="p-6">
-            <.empty_state message="No issues are currently backing off." />
+            <.empty_state message={
+              if @empty_q != "", do: "No retry entries match the filter.", else: "No issues are currently backing off."
+            } />
           </div>
         <% else %>
           <div class="overflow-x-auto">
             <.table>
+              <.table_caption class="sr-only">Retry queue table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <.table_head class="text-[11px] uppercase tracking-wide">Issue</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Attempt</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Due at</.table_head>
-                  <.table_head class="text-[11px] uppercase tracking-wide">Error</.table_head>
+                  <th scope="col" class={@table_header_cell_class}>Issue</th>
+                  <th scope="col" class={@table_header_cell_class}>Attempt</th>
+                  <th scope="col" class={@table_header_cell_class}>Due at</th>
+                  <th scope="col" class={@table_header_cell_class}>Error</th>
                 </.table_row>
               </.table_header>
               <.table_body>
@@ -509,7 +705,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
   # ---- data / formatting helpers ----
 
   defp load_payload do
-    Presenter.state_payload(SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
+    Presenter.state_payload(orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
+  end
+
+  defp orchestrator do
+    SymphonyElixirWeb.orchestrator()
   end
 
   defp external_issue_url(url) when is_binary(url) do
@@ -577,37 +777,151 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp format_int(_value), do: "—"
 
-  defp schedule_runtime_tick do
-    Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
+  # ---- filter helpers ----
+
+  defp filtered_running(payload, q, harness_filter) do
+    (Map.get(payload, :running) || [])
+    |> Enum.filter(&matches_identifier?(&1.issue_identifier, q))
+    |> Enum.filter(&matches_harness?(&1.harness, harness_filter))
   end
 
-  defp pretty_value(nil), do: "—"
-  defp pretty_value(value), do: inspect(value, pretty: true, limit: :infinity)
+  defp filtered_blocked(payload, q, harness_filter) do
+    (Map.get(payload, :blocked) || [])
+    |> Enum.filter(&matches_identifier?(&1.issue_identifier, q))
+    |> Enum.filter(&matches_harness?(&1.harness, harness_filter))
+  end
+
+  defp filtered_retrying(payload, q) do
+    Enum.filter(Map.get(payload, :retrying) || [], &matches_identifier?(&1.issue_identifier, q))
+  end
+
+  defp matches_identifier?(_identifier, q) when q == "" or is_nil(q), do: true
+
+  defp matches_identifier?(identifier, q) when is_binary(identifier) and is_binary(q) do
+    String.contains?(String.downcase(identifier), String.downcase(q))
+  end
+
+  defp matches_identifier?(_identifier, _q), do: false
+
+  defp matches_harness?(_harness, "all"), do: true
+
+  defp matches_harness?(nil, _filter) do
+    String.downcase("codex") == _filter
+  end
+
+  defp matches_harness?(harness, filter) when is_binary(harness) and is_binary(filter) do
+    String.downcase(harness) == filter
+  end
+
+  defp matches_harness?(_harness, _filter) do
+    String.downcase("codex") == _filter
+  end
+
+  # ---- rate limit helpers ----
+
+  defp rate_limit_bucket(rate_limits, keys) when is_map(rate_limits) and is_list(keys) do
+    Enum.find_value(keys, fn key -> Map.get(rate_limits, key) end)
+  end
+
+  defp format_rate_limit_bucket(nil), do: "n/a"
+
+  defp format_rate_limit_bucket(bucket) when is_map(bucket) do
+    remaining = Map.get(bucket, "remaining") || Map.get(bucket, :remaining)
+    limit = Map.get(bucket, "limit") || Map.get(bucket, :limit)
+
+    reset_value =
+      Map.get(bucket, "reset_in_seconds") || Map.get(bucket, :reset_in_seconds) ||
+        Map.get(bucket, "resetInSeconds") || Map.get(bucket, :resetInSeconds) ||
+        Map.get(bucket, "reset_at") || Map.get(bucket, :reset_at) ||
+        Map.get(bucket, "resetAt") || Map.get(bucket, :resetAt) ||
+        Map.get(bucket, "resets_at") || Map.get(bucket, :resets_at) ||
+        Map.get(bucket, "resetsAt") || Map.get(bucket, :resetsAt)
+
+    base =
+      cond do
+        is_integer(remaining) and is_integer(limit) ->
+          "#{format_int(remaining)}/#{format_int(limit)}"
+
+        is_integer(remaining) ->
+          "remaining #{format_int(remaining)}"
+
+        is_integer(limit) ->
+          "limit #{format_int(limit)}"
+
+        map_size(bucket) == 0 ->
+          "n/a"
+
+        true ->
+          bucket |> inspect(limit: 6) |> String.slice(0, 40)
+      end
+
+    if is_nil(reset_value) do
+      base
+    else
+      "#{base} reset #{format_reset_value(reset_value)}"
+    end
+  end
+
+  defp format_rate_limit_bucket(other), do: to_string(other)
+
+  defp format_rate_limit_credits(nil), do: "credits n/a"
+
+  defp format_rate_limit_credits(credits) when is_map(credits) do
+    unlimited = Map.get(credits, "unlimited") == true || Map.get(credits, :unlimited) == true
+    has_credits = Map.get(credits, "has_credits") == true || Map.get(credits, :has_credits) == true
+    balance = Map.get(credits, "balance") || Map.get(credits, :balance)
+
+    cond do
+      unlimited ->
+        "credits unlimited"
+
+      has_credits and is_number(balance) ->
+        "credits #{format_number(balance)}"
+
+      has_credits ->
+        "credits available"
+
+      true ->
+        "credits none"
+    end
+  end
+
+  defp format_rate_limit_credits(other), do: "credits #{to_string(other)}"
+
+  defp format_reset_value(value) when is_integer(value), do: "#{format_int(value)}s"
+  defp format_reset_value(value) when is_binary(value), do: value
+  defp format_reset_value(value), do: to_string(value)
+
+  defp format_number(value) when is_integer(value), do: format_int(value)
+
+  defp format_number(value) when is_float(value) do
+    value
+    |> Float.round(2)
+    |> :erlang.float_to_binary(decimals: 2)
+  end
 
   defp update_workflow_harness(kind) do
-    path = SymphonyElixir.Workflow.workflow_file_path()
+    SymphonyElixir.WorkflowStore.update_harness(kind)
+  end
 
-    with {:ok, content} <- File.read(path) do
-      updated =
-        if String.contains?(content, "harness:") do
-          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, content, "harness:\n  kind: #{kind}\n")
-          |> then(fn c ->
-            if String.contains?(c, "kind: #{kind}"),
-              do: c,
-              else: String.replace(c, ~r/harness:\s*\n/, "harness:\n  kind: #{kind}\n", global: false)
-          end)
-        else
-          String.replace(content, "---\n", "---\nharness:\n  kind: #{kind}\n", global: false)
+  defp harness_select_options do
+    SymphonyElixir.Harness.supported_harnesses()
+    |> Enum.map(fn kind ->
+      label =
+        case kind do
+          "codex" -> "Codex — default"
+          "prime" -> "Prime Agent"
+          _ -> String.capitalize(kind)
         end
 
-      case File.write(path, updated) do
-        :ok ->
-          SymphonyElixir.WorkflowStore.force_reload()
-          :ok
+      {kind, label}
+    end)
+  end
 
-        {:error, reason} ->
-          {:error, reason}
-      end
-    end
+  defp harness_filter_options do
+    [{"all", "All harnesses"}] ++
+      Enum.map(SymphonyElixir.Harness.supported_harnesses(), fn kind ->
+        {kind, String.capitalize(kind)}
+      end)
   end
 end

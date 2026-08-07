@@ -219,7 +219,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp start_port(workspace, worker_host, dynamic_tool_binding) when is_binary(worker_host) do
     remote_command = remote_launch_command(workspace, dynamic_tool_binding)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
+    SSH.start_port(worker_host, remote_command, line: Harness.port_line_bytes())
   end
 
   defp local_launch_command(dynamic_tool_binding) do

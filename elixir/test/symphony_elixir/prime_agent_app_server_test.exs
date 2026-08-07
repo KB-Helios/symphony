@@ -187,4 +187,3 @@ defmodule SymphonyElixir.PrimeAgentAppServerTest do
     end
   end
 end
-end

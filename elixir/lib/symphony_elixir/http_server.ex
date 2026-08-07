@@ -82,7 +82,37 @@ defmodule SymphonyElixir.HttpServer do
   defp normalize_host(host) when is_binary(host), do: host
   defp normalize_host(host), do: to_string(host)
 
-  defp secret_key_base do
+  @spec secret_key_base() :: String.t()
+  def secret_key_base do
+    case System.get_env("SECRET_KEY_BASE") do
+      value when is_binary(value) ->
+        trimmed = String.trim(value)
+
+        if String.length(trimmed) >= 64 do
+          trimmed
+        else
+          if production_like_env?() do
+            raise "SECRET_KEY_BASE must be at least 64 characters in production, got #{String.length(trimmed)}"
+          else
+            generate_secret_key_base()
+          end
+        end
+
+      _ ->
+        if production_like_env?() do
+          raise "SECRET_KEY_BASE is required in production but not set"
+        else
+          generate_secret_key_base()
+        end
+    end
+  end
+
+  defp production_like_env? do
+    env = System.get_env("MIX_ENV") || "dev"
+    env in ["prod", "production"]
+  end
+
+  defp generate_secret_key_base do
     Base.encode64(:crypto.strong_rand_bytes(@secret_key_bytes), padding: false)
   end
 end

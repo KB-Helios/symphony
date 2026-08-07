@@ -8,6 +8,11 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   alias Plug.Conn
   alias SymphonyElixirWeb.{Endpoint, Presenter}
 
+  @spec health(Conn.t(), map()) :: Conn.t()
+  def health(conn, _params) do
+    json(conn, %{status: "ok", version: app_version()})
+  end
+
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
     json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
@@ -22,6 +27,9 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
         :ok ->
           json(conn, %{harness: normalized, supported_harnesses: SymphonyElixir.Harness.supported_harnesses()})
 
+        {:error, :invalid_harness} ->
+          error_response(conn, 400, "invalid_harness", "harness must be one of: #{Enum.join(SymphonyElixir.Harness.supported_harnesses(), ", ")}")
+
         {:error, reason} ->
           error_response(conn, 500, "harness_update_failed", inspect(reason))
       end
@@ -35,24 +43,14 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
   end
 
   defp update_workflow_harness(kind) do
-    path = SymphonyElixir.Workflow.workflow_file_path()
+    SymphonyElixir.WorkflowStore.update_harness(kind)
+  end
 
-    with {:ok, content} <- File.read(path) do
-      updated =
-        if String.contains?(content, "harness:") do
-          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, content, "harness:\n  kind: #{kind}\n")
-        else
-          String.replace(content, "---\n", "---\nharness:\n  kind: #{kind}\n", global: false)
-        end
-
-      case File.write(path, updated) do
-        :ok ->
-          SymphonyElixir.WorkflowStore.force_reload()
-          :ok
-
-        {:error, reason} ->
-          {:error, reason}
-      end
+  defp app_version do
+    case Application.spec(:symphony_elixir, :vsn) do
+      vsn when is_list(vsn) -> List.to_string(vsn)
+      vsn when is_binary(vsn) -> vsn
+      _ -> "0.0.0"
     end
   end
 

@@ -164,6 +164,7 @@ defmodule SymphonyElixirWeb.Presenter do
   defp running_issue_payload(running) do
     %{
       harness: Map.get(running, :harness, "codex"),
+      issue_url: Map.get(running, :issue_url),
       worker_host: Map.get(running, :worker_host),
       workspace_path: Map.get(running, :workspace_path),
       session_id: running.session_id,
@@ -186,6 +187,7 @@ defmodule SymphonyElixirWeb.Presenter do
       attempt: retry.attempt,
       due_at: due_at_iso8601(retry.due_in_ms),
       error: retry.error,
+      issue_url: Map.get(retry, :issue_url),
       worker_host: Map.get(retry, :worker_host),
       workspace_path: Map.get(retry, :workspace_path)
     }
@@ -194,6 +196,7 @@ defmodule SymphonyElixirWeb.Presenter do
   defp blocked_issue_payload(blocked) do
     %{
       harness: Map.get(blocked, :harness, "codex"),
+      issue_url: Map.get(blocked, :issue_url),
       worker_host: Map.get(blocked, :worker_host),
       workspace_path: Map.get(blocked, :workspace_path),
       session_id: blocked.session_id,
