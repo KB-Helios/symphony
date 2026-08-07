@@ -5,9 +5,6 @@ defmodule SymphonyElixirWeb.Layouts do
 
   use SymphonyElixirWeb, :component
 
-  @doc """
-  Renders the application’s root HTML document layout, including shared metadata, assets, and inner content.
-  """
   @spec root(map()) :: Phoenix.LiveView.Rendered.t()
   def root(assigns) do
     assigns =
@@ -53,15 +50,6 @@ defmodule SymphonyElixirWeb.Layouts do
     """
   end
 
-  @doc """
-  Renders the responsive observability dashboard layout with route-aware navigation,
-  theme controls, session access, flash messages, and inner content.
-  
-  ## Parameters
-  
-    - assigns: Layout assigns, including `:inner_content`, `:flash`, and optionally
-      `:current_path`.
-  """
   @spec app(map()) :: Phoenix.LiveView.Rendered.t()
   def app(assigns) do
     current = assigns[:current_path] || "/"

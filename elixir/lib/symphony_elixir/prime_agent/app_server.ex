@@ -22,10 +22,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   @port_line_bytes 10_485_760
   @json_mode_flag "--mode json"
 
-  @doc """
-Returns the maximum number of bytes allowed in a framed port line.
-"""
-@spec port_line_bytes() :: pos_integer()
+  @spec port_line_bytes() :: pos_integer()
   def port_line_bytes, do: @port_line_bytes
 
   @type session :: %{
@@ -50,18 +47,6 @@ Returns the maximum number of bytes allowed in a framed port line.
   end
 
   @impl SymphonyElixir.Harness
-  @doc """
-  Starts a Prime agent session for the specified workspace.
-  
-  ## Parameters
-  
-    - workspace: Path to the workspace in which the session runs.
-    - opts: Session options, including an optional `:worker_host`.
-  
-  ## Returns
-  
-    A session state on success, or an error describing why the session could not start.
-  """
   @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
@@ -86,20 +71,6 @@ Returns the maximum number of bytes allowed in a framed port line.
   end
 
   @impl SymphonyElixir.Harness
-  @doc """
-  Executes one Prime turn for the current session.
-  
-  ## Parameters
-  
-    - issue: Issue context associated with the turn.
-    - opts: Options, including an optional `:on_message` callback for emitted events.
-  
-  ## Returns
-  
-    - `{:ok, result}` with the Prime result and session, thread, and turn identifiers.
-    - `{:error, reason}` when the turn cannot be completed.
-  
-  """
   @spec run_turn(session(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run_turn(
         %{
@@ -249,35 +220,12 @@ Returns the maximum number of bytes allowed in a framed port line.
   end
 
   # Exposed for testing — not part of Harness behaviour.
-  @doc """
-  Builds the remote Prime launch command for a workspace using the current tracker tool binding.
-  
-  ## Parameters
-  
-    - workspace: Remote workspace path where Prime will run.
-  
-  ## Returns
-  
-  The escaped remote launch command.
-  """
   @spec remote_launch_command_for_test(Path.t()) :: String.t()
   def remote_launch_command_for_test(workspace) when is_binary(workspace) do
     binding = Tracker.bind_agent_tools()
     remote_launch_command(workspace, binding)
   end
 
-  @doc """
-  Builds the remote Prime launch command for a workspace and dynamic tool binding.
-  
-  ## Parameters
-  
-    - workspace: Remote workspace path.
-    - binding: Dynamic tool binding passed to Prime.
-  
-  ## Returns
-  
-  The escaped remote launch command.
-  """
   @spec remote_launch_command_for_test(Path.t(), map()) :: String.t()
   def remote_launch_command_for_test(workspace, binding)
       when is_binary(workspace) and is_map(binding) do

@@ -9,21 +9,6 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
 
   @impl true
-  @doc """
-  Initializes the issue detail view for the specified issue identifier.
-  
-  Subscribes to observability updates when the LiveView is connected.
-  
-  ## Parameters
-  
-    - params: Route parameters containing the issue `identifier`.
-  
-  ## Returns
-  
-    - A socket initialized with the issue identifier, current path, and loaded issue result.
-  """
-  @spec mount(%{"identifier" => String.t()}, term(), Phoenix.LiveView.Socket.t()) ::
-          {:ok, Phoenix.LiveView.Socket.t()}
   def mount(%{"identifier" => identifier}, _session, socket) do
     socket =
       socket
@@ -37,21 +22,11 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   end
 
   @impl true
-  @doc """
-  Refreshes the displayed issue data when observability information changes.
-  
-  @spec handle_info(:observability_updated, Phoenix.LiveView.Socket.t()) ::
-          {:noreply, Phoenix.LiveView.Socket.t()}
-  """
   def handle_info(:observability_updated, socket) do
     {:noreply, assign(socket, :result, load_issue(socket.assigns.identifier))}
   end
 
   @impl true
-  @doc """
-  Renders the issue detail page, including the tracked issue information or a not-found state.
-  """
-  @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
     ~H"""
     <div class="space-y-6">

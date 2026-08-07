@@ -8,16 +8,6 @@ defmodule SymphonyElixirWeb.SessionsLive do
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
 
   @impl true
-  @doc """
-  Initializes the sessions view with the current observability payload and path.
-  
-  Subscribes to observability updates when the socket is connected.
-  
-  ## Returns
-  
-    - `{:ok, socket}` containing the initialized session view state.
-  """
-  @spec mount(map(), map(), Phoenix.LiveView.Socket.t()) :: {:ok, Phoenix.LiveView.Socket.t()}
   def mount(_params, _session, socket) do
     socket =
       socket
@@ -30,22 +20,11 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   @impl true
-  @doc """
-  Refreshes the session observability payload after an observability update.
-  """
-  @spec handle_info(:observability_updated, Phoenix.LiveView.Socket.t()) ::
-          {:noreply, Phoenix.LiveView.Socket.t()}
   def handle_info(:observability_updated, socket) do
     {:noreply, assign(socket, :payload, load_payload())}
   end
 
   @impl true
-  @doc """
-  Renders the tracked sessions page grouped by running, blocked, and retrying status.
-  
-  Displays session counts, snapshot errors, an empty state, or a table with links to individual sessions.
-  """
-  @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
     ~H"""
     <div class="space-y-6">

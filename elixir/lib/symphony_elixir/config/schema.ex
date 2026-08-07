@@ -418,17 +418,6 @@ defmodule SymphonyElixir.Config.Schema do
   @spec normalize_state_limits(nil | map()) :: map()
   def normalize_state_limits(nil), do: %{}
 
-  @doc """
-  Normalizes per-state concurrency limits by standardizing state names and retaining valid positive limits.
-  
-  ## Parameters
-  
-    - limits: Map of state names to concurrency limits.
-  
-  ## Returns
-  
-    A map containing nonblank normalized state names associated with positive integer limits.
-  """
   def normalize_state_limits(limits) when is_map(limits) do
     Enum.reduce(limits, %{}, fn {state_name, limit}, acc ->
       key = normalize_issue_state(to_string(state_name))

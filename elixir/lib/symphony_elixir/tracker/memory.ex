@@ -7,28 +7,9 @@ defmodule SymphonyElixir.Tracker.Memory do
 
   alias SymphonyElixir.Tracker.Issue
 
-  @doc """
-Handles a request with no states by returning an empty issue list.
-
-## Returns
-
-  - `{:ok, []}`
-"""
-@spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_states([]), do: {:ok, []}
 
-  @doc """
-  Finds configured issues whose states match the requested state names.
-  
-  ## Parameters
-  
-    - state_names: State names to match after trimming whitespace and converting them to lowercase.
-  
-  ## Returns
-  
-    A tuple containing the matching issues.
-  """
-  @spec fetch_issues_by_states([String.t()]) :: {:ok, list()}
   def fetch_issues_by_states(state_names) do
     normalized_states =
       state_names
@@ -41,32 +22,9 @@ Handles a request with no states by returning an empty issue list.
      end)}
   end
 
-  @doc """
-Fetches configured issues matching the requested IDs.
-
-## Parameters
-
-  - ids: Issue IDs to match.
-
-## Returns
-
-  `{:ok, issues}` containing the matching issues, or an error tuple.
-"""
-@spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  @spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
   def fetch_issues_by_ids([]), do: {:ok, []}
 
-  @doc """
-  Fetches configured issues whose IDs match the requested IDs.
-  
-  ## Parameters
-  
-    - issue_ids: List of issue IDs to retrieve.
-  
-  ## Returns
-  
-    `{:ok, issues}` containing the configured issues with matching IDs.
-  """
-  @spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]}
   def fetch_issues_by_ids(issue_ids) do
     wanted_ids = MapSet.new(issue_ids)
 
