@@ -19,6 +19,10 @@ const ClipboardCopy = {
         this.el.textContent = "Copied";
         clearTimeout(this._t);
         this._t = setTimeout(() => (this.el.textContent = label), 1200);
+      }).catch(() => {
+        this.el.textContent = "Failed";
+        clearTimeout(this._t);
+        this._t = setTimeout(() => (this.el.textContent = label), 1200);
       });
     };
     this.el.addEventListener("click", this.handle);

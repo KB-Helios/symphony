@@ -20,7 +20,7 @@ defmodule SymphonyElixirWeb.Endpoint do
   # this works both from `mix run` and from the escript/release layout.
   plug(Plug.Static,
     at: "/",
-    from: Path.expand("../../priv/static", __DIR__),
+    from: {:symphony_elixir, "priv/static"},
     gzip: false,
     only: ~w(assets fonts images favicon.png)
   )

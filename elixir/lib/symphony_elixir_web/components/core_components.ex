@@ -85,6 +85,28 @@ defmodule SymphonyElixirWeb.CoreComponents do
     """
   end
 
+  @doc """
+  Renders a status badge for session status (running, blocked, retrying).
+  """
+  attr(:status, :string, required: true)
+
+  @spec status_badge(map()) :: Phoenix.LiveView.Rendered.t()
+  def status_badge(assigns) do
+    variant =
+      case assigns.status do
+        "running" -> "default"
+        "blocked" -> "destructive"
+        "retrying" -> "secondary"
+        _ -> "outline"
+      end
+
+    assigns = assign(assigns, :variant, variant)
+
+    ~H"""
+    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize"><%= @status %></.badge>
+    """
+  end
+
   defp hide(js, selector) do
     JS.hide(js,
       to: selector,

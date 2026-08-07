@@ -82,9 +82,6 @@ defmodule SymphonyElixirWeb.Layouts do
             <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
               Live snapshot via OTP + Linear polling.
             </p>
-            <span class="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-              <span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span> Connected
-            </span>
           </div>
           <button
             type="button"
@@ -112,6 +109,16 @@ defmodule SymphonyElixirWeb.Layouts do
               S
             </span>
             <span class="text-sm font-semibold tracking-tight">Symphony</span>
+            <div class="relative ml-2 inline-flex md:hidden">
+              <select
+                onchange="window.location.href = this.value"
+                class="h-8 appearance-none rounded-lg border border-border bg-card px-3 pr-7 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="/" selected={@current == "/"}>Overview</option>
+                <option value="/sessions" selected={String.starts_with?(@current, "/sessions")}>Sessions</option>
+              </select>
+              <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">▼</span>
+            </div>
           </div>
           <nav class="hidden items-center gap-1 md:flex">
             <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
@@ -188,7 +195,9 @@ defmodule SymphonyElixirWeb.Layouts do
   slot(:inner_block, required: true)
 
   defp top_nav_link(assigns) do
-    active = assigns.current == assigns.href
+    href = assigns.href
+    current = assigns.current
+    active = current == href || (href == "/sessions" && String.starts_with?(current, "/sessions"))
     assigns = assign(assigns, :active, active)
 
     ~H"""
