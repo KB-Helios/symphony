@@ -66,30 +66,42 @@ defmodule SymphonyElixir.WorkflowStore do
   def update_harness(kind) when is_binary(kind) do
     normalized = kind |> String.trim() |> String.downcase()
 
-    if normalized not in ["codex", "prime"] do
+    if normalized not in SymphonyElixir.Harness.supported_harnesses() do
       {:error, :invalid_harness}
     else
-      path = Workflow.workflow_file_path()
+      case Process.whereis(__MODULE__) do
+        pid when is_pid(pid) ->
+          GenServer.call(__MODULE__, {:update_harness, normalized})
 
-      with {:ok, content} <- File.read(path),
-           {:ok, updated} <- build_updated_content(content, normalized),
-           :ok <- atomic_write(path, updated) do
-        force_reload()
-        :ok
-      else
-        {:error, reason} -> {:error, reason}
+        _ ->
+          perform_harness_update(normalized)
       end
     end
   end
 
   def update_harness(_kind), do: {:error, :invalid_harness}
 
+  defp perform_harness_update(kind) do
+    path = Workflow.workflow_file_path()
+
+    with {:ok, content} <- File.read(path),
+         {:ok, updated} <- build_updated_content(content, kind),
+         :ok <- atomic_write(path, updated),
+         :ok <- force_reload() do
+      :ok
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp build_updated_content(content, kind) do
     case split_front_matter(content) do
       {:ok, {front_matter, body, delimiter}} ->
-        with :ok <- validate_front_matter_yaml(front_matter) do
-          updated_front = update_front_matter_string(front_matter, kind)
+        with :ok <- validate_front_matter_yaml(front_matter),
+             updated_front when is_binary(updated_front) <- update_front_matter_string(front_matter, kind) do
           {:ok, delimiter <> updated_front <> delimiter <> body}
+        else
+          {:error, reason} -> {:error, reason}
         end
 
       {:error, reason} ->
@@ -125,14 +137,10 @@ defmodule SymphonyElixir.WorkflowStore do
     if yaml == "" do
       :ok
     else
-      if Code.ensure_loaded?(YamlElixir) and function_exported?(YamlElixir, :read_from_string, 1) do
-        case YamlElixir.read_from_string(yaml) do
-          {:ok, decoded} when is_map(decoded) -> :ok
-          {:ok, _} -> {:error, :workflow_front_matter_not_a_map}
-          {:error, reason} -> {:error, {:workflow_parse_error, reason}}
-        end
-      else
-        :ok
+      case YamlElixir.read_from_string(yaml) do
+        {:ok, decoded} when is_map(decoded) -> :ok
+        {:ok, _} -> {:error, :workflow_front_matter_not_a_map}
+        {:error, reason} -> {:error, {:workflow_parse_error, reason}}
       end
     end
   end
@@ -140,25 +148,61 @@ defmodule SymphonyElixir.WorkflowStore do
   defp update_front_matter_string(front_matter, kind) do
     trimmed = String.trim(front_matter)
 
-    cond do
-      trimmed == "" ->
-        "harness:\n  kind: #{kind}\n"
+    if trimmed == "" do
+      "harness:\n  kind: #{kind}\n"
+    else
+      case YamlElixir.read_from_string(trimmed) do
+        {:ok, decoded} when is_map(decoded) ->
+          harness_map = Map.get(decoded, "harness", %{})
 
-      String.contains?(front_matter, "harness:") ->
-        updated =
-          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, front_matter, "harness:\n  kind: #{kind}\n")
+          updated_harness =
+            if is_map(harness_map) do
+              Map.put(harness_map, "kind", kind)
+            else
+              %{"kind" => kind}
+            end
 
-        if String.contains?(updated, "kind: #{kind}") do
-          ensure_trailing_newline(updated)
-        else
-          Regex.replace(~r/harness:\s*\n/, front_matter, "harness:\n  kind: #{kind}\n")
-          |> ensure_trailing_newline()
-        end
+          updated_map = Map.put(decoded, "harness", updated_harness)
+          yaml_string = encode_yaml_map(updated_map)
 
-      true ->
-        base = front_matter |> String.trim_trailing() |> ensure_trailing_newline()
-        base <> "harness:\n  kind: #{kind}\n"
+          case YamlElixir.read_from_string(yaml_string) do
+            {:ok, verified} when is_map(verified) ->
+              verified_kind = get_in(verified, ["harness", "kind"])
+
+              if verified_kind == kind do
+                ensure_trailing_newline(yaml_string)
+              else
+                {:error, :harness_kind_not_set}
+              end
+
+            _ ->
+              {:error, :yaml_verification_failed}
+          end
+
+        {:ok, _non_map} ->
+          {:error, :workflow_front_matter_not_a_map}
+
+        {:error, reason} ->
+          {:error, {:workflow_parse_error, reason}}
+      end
     end
+  end
+
+  defp encode_yaml_map(map) do
+    Enum.map_join(map, "\n", fn {key, value} ->
+      encode_yaml_entry(key, value, 0)
+    end) <> "\n"
+  end
+
+  defp encode_yaml_entry(key, value, indent) when is_map(value) do
+    indentation = String.duplicate("  ", indent)
+    nested_content = Enum.map_join(value, "\n", fn {k, v} -> encode_yaml_entry(k, v, indent + 1) end)
+    "#{indentation}#{key}:\n#{nested_content}"
+  end
+
+  defp encode_yaml_entry(key, value, indent) do
+    indentation = String.duplicate("  ", indent)
+    "#{indentation}#{key}: #{value}"
   end
 
   defp ensure_trailing_newline(""), do: ""
@@ -220,6 +264,22 @@ defmodule SymphonyElixir.WorkflowStore do
 
       {:error, _reason, new_state} ->
         {:reply, {:ok, new_state.settings}, new_state}
+    end
+  end
+
+  def handle_call({:update_harness, kind}, _from, %State{} = state) do
+    case perform_harness_update(kind) do
+      :ok ->
+        case reload_state(state) do
+          {:ok, new_state} ->
+            {:reply, :ok, new_state}
+
+          {:error, reason, new_state} ->
+            {:reply, {:error, reason}, new_state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 

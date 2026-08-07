@@ -90,7 +90,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
         >
-          Open in tracker <.icon name="hero-arrow-top-right-on-square" class="h-3.5 w-3.5" />
+          Open in tracker<span class="sr-only"> (opens in new tab)</span> <.icon name="hero-arrow-top-right-on-square" class="h-3.5 w-3.5" />
         </.link>
       </:actions>
     </.header>

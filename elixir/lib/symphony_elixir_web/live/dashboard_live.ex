@@ -7,6 +7,8 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   alias SymphonyElixirWeb.{ObservabilityPubSub, Presenter}
 
+  @table_header_cell_class "h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide"
+
   @impl true
   def mount(_params, _session, socket) do
     payload = load_payload()
@@ -36,7 +38,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
     normalized = harness |> to_string() |> String.trim() |> String.downcase()
 
     case normalized do
-      kind when kind in ["codex", "prime"] ->
+      kind when kind in SymphonyElixir.Harness.supported_harnesses() ->
         case update_workflow_harness(kind) do
           :ok ->
             payload = load_payload()
@@ -79,7 +81,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   @impl true
   def handle_event("filter", %{"harness" => harness}, socket) do
     normalized = harness |> to_string() |> String.trim() |> String.downcase()
-    harness_filter = if normalized in ["codex", "prime"], do: normalized, else: "all"
+    harness_filter = if normalized in SymphonyElixir.Harness.supported_harnesses(), do: normalized, else: "all"
     payload = socket.assigns.payload
     q = socket.assigns.q
 
@@ -242,8 +244,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
                   name="harness"
                   class="flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
-                  <option value="codex" selected={@payload[:harness] == "codex"}>Codex — default</option>
-                  <option value="prime" selected={@payload[:harness] == "prime"}>Prime Agent</option>
+                  <option :for={{value, label} <- harness_select_options()} value={value} selected={@payload[:harness] == value}><%= label %></option>
                 </select>
                 <p class="mt-2 text-xs text-muted-foreground">
                   Current: <span class="font-medium text-foreground"><%= @payload[:harness] || "codex" %></span>
@@ -342,9 +343,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
             name="harness"
             class="flex h-9 items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
-            <option value="all" selected={@harness_filter == "all"}>All harnesses</option>
-            <option value="codex" selected={@harness_filter == "codex"}>Codex</option>
-            <option value="prime" selected={@harness_filter == "prime"}>Prime</option>
+            <option :for={{value, label} <- harness_filter_options()} value={value} selected={@harness_filter == value}><%= label %></option>
           </select>
         </form>
 
@@ -360,7 +359,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp rate_limits_content(assigns) do
     ~H"""
-    <%= if is_nil(@rate_limits) do %>
+    <%= if is_nil(@rate_limits) or not is_map(@rate_limits) do %>
       <p class="py-6 text-center text-sm text-muted-foreground">— unavailable</p>
     <% else %>
       <% primary = rate_limit_bucket(@rate_limits, ["primary", :primary]) %>
@@ -438,6 +437,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:kind, :atom, required: true)
 
   defp sessions_card(assigns) do
+    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -462,20 +462,20 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </div>
         <% else %>
           <div class="overflow-x-auto">
-            <.table aria-busy="false">
+            <.table>
               <.table_caption class="sr-only"><%= @title %> table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Issue</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">State</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Harness</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Session</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide"><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Last update</th>
+                  <th scope="col" class={@table_header_cell_class}>Issue</th>
+                  <th scope="col" class={@table_header_cell_class}>State</th>
+                  <th scope="col" class={@table_header_cell_class}>Harness</th>
+                  <th scope="col" class={@table_header_cell_class}>Session</th>
+                  <th scope="col" class={@table_header_cell_class}><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></th>
+                  <th scope="col" class={@table_header_cell_class}>Last update</th>
                   <%= if @kind == :running do %>
-                    <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Tokens</th>
+                    <th scope="col" class={@table_header_cell_class}>Tokens</th>
                   <% else %>
-                    <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Error</th>
+                    <th scope="col" class={@table_header_cell_class}>Error</th>
                   <% end %>
                 </.table_row>
               </.table_header>
@@ -573,6 +573,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:empty_q, :string, default: "")
 
   defp retry_card(assigns) do
+    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -595,14 +596,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </div>
         <% else %>
           <div class="overflow-x-auto">
-            <.table aria-busy="false">
+            <.table>
               <.table_caption class="sr-only">Retry queue table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Issue</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Attempt</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Due at</th>
-                  <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Error</th>
+                  <th scope="col" class={@table_header_cell_class}>Issue</th>
+                  <th scope="col" class={@table_header_cell_class}>Attempt</th>
+                  <th scope="col" class={@table_header_cell_class}>Due at</th>
+                  <th scope="col" class={@table_header_cell_class}>Error</th>
                 </.table_row>
               </.table_header>
               <.table_body>
@@ -779,19 +780,19 @@ defmodule SymphonyElixirWeb.DashboardLive do
   # ---- filter helpers ----
 
   defp filtered_running(payload, q, harness_filter) do
-    payload.running
+    (Map.get(payload, :running) || [])
     |> Enum.filter(&matches_identifier?(&1.issue_identifier, q))
     |> Enum.filter(&matches_harness?(&1.harness, harness_filter))
   end
 
   defp filtered_blocked(payload, q, harness_filter) do
-    payload.blocked
+    (Map.get(payload, :blocked) || [])
     |> Enum.filter(&matches_identifier?(&1.issue_identifier, q))
     |> Enum.filter(&matches_harness?(&1.harness, harness_filter))
   end
 
   defp filtered_retrying(payload, q) do
-    Enum.filter(payload.retrying, &matches_identifier?(&1.issue_identifier, q))
+    Enum.filter(Map.get(payload, :retrying) || [], &matches_identifier?(&1.issue_identifier, q))
   end
 
   defp matches_identifier?(_identifier, q) when q == "" or is_nil(q), do: true
@@ -803,13 +804,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
   defp matches_identifier?(_identifier, _q), do: false
 
   defp matches_harness?(_harness, "all"), do: true
-  defp matches_harness?(nil, _filter), do: true
+
+  defp matches_harness?(nil, _filter) do
+    String.downcase("codex") == _filter
+  end
 
   defp matches_harness?(harness, filter) when is_binary(harness) and is_binary(filter) do
     String.downcase(harness) == filter
   end
 
-  defp matches_harness?(_harness, _filter), do: true
+  defp matches_harness?(_harness, _filter) do
+    String.downcase("codex") == _filter
+  end
 
   # ---- rate limit helpers ----
 
@@ -896,5 +902,26 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp update_workflow_harness(kind) do
     SymphonyElixir.WorkflowStore.update_harness(kind)
+  end
+
+  defp harness_select_options do
+    SymphonyElixir.Harness.supported_harnesses()
+    |> Enum.map(fn kind ->
+      label =
+        case kind do
+          "codex" -> "Codex — default"
+          "prime" -> "Prime Agent"
+          _ -> String.capitalize(kind)
+        end
+
+      {kind, label}
+    end)
+  end
+
+  defp harness_filter_options do
+    [{"all", "All harnesses"}] ++
+      Enum.map(SymphonyElixir.Harness.supported_harnesses(), fn kind ->
+        {kind, String.capitalize(kind)}
+      end)
   end
 end

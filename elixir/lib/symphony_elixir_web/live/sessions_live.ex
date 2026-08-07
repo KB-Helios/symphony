@@ -39,7 +39,6 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
   def handle_event("switch_tab", _params, socket), do: {:noreply, socket}
 
-  @impl true
   def handle_event("search", %{"q" => q}, socket) do
     q = q |> to_string() |> String.trim() |> String.slice(0, 120)
     {:noreply, assign(socket, q: q, page: 1)}
@@ -47,7 +46,6 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
   def handle_event("search", _params, socket), do: {:noreply, socket}
 
-  @impl true
   def handle_event("sort", %{"sort" => sort}, socket) do
     sort_by = parse_sort(sort)
     current_by = socket.assigns.sort_by
@@ -65,7 +63,6 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
   def handle_event("sort", _params, socket), do: {:noreply, socket}
 
-  @impl true
   def handle_event("paginate", %{"page" => page}, socket) do
     page_int =
       case Integer.parse(to_string(page)) do
@@ -148,12 +145,13 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   placeholder="Filter by issue…"
                   phx-debounce="300"
                   autocomplete="off"
+                  aria-label="Filter sessions by issue identifier"
                   class="flex h-9 w-full rounded-xl border border-input bg-background py-2 pl-9 pr-3 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 />
               </div>
             </form>
 
-            <div role="tablist" class="flex flex-wrap items-center gap-1.5">
+            <div role="tablist" aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
               <.tab_button tab={@tab} value={:all} count={total(@payload)} icon="hero-squares-2x2" label="All" />
               <.tab_button
                 tab={@tab}
@@ -179,7 +177,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
             </div>
           </div>
 
-          <.card_content class="p-0">
+          <.card_content class="p-0" role="tabpanel" id="sessions-table-panel">
             <%= if total(@payload) == 0 do %>
               <div class="p-6">
                 <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-12 text-center">
@@ -217,7 +215,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                       <.table_caption class="sr-only">Sessions table</.table_caption>
                     <.table_header>
                       <.table_row class="hover:bg-transparent">
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :identifier)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
                           <button
                             phx-click="sort"
                             phx-value-sort="identifier"
@@ -226,7 +224,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                             Issue <.icon name={sort_icon(@sort_by, @sort_dir, :identifier)} class="h-3 w-3" />
                           </button>
                         </th>
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :status)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
                           <button
                             phx-click="sort"
                             phx-value-sort="status"
@@ -235,7 +233,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                             Status <.icon name={sort_icon(@sort_by, @sort_dir, :status)} class="h-3 w-3" />
                           </button>
                         </th>
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :state)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
                           <button
                             phx-click="sort"
                             phx-value-sort="state"
@@ -333,10 +331,10 @@ defmodule SymphonyElixirWeb.SessionsLive do
   defp mini_stat(assigns) do
     ~H"""
     <.card class="card-elevated">
-      <.card_content class="flex items-center justify-between gap-3 p-4">
+      <.card_content role="status" aria-live="polite" aria-atomic="true" class="flex items-center justify-between gap-3 p-4">
         <div>
           <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground"><%= @label %></p>
-          <p role="status" aria-live="polite" aria-atomic="true" class="numeric mt-1 text-2xl font-semibold tracking-tight"><%= @value %></p>
+          <p class="numeric mt-1 text-2xl font-semibold tracking-tight"><%= @value %></p>
         </div>
         <span class={[
           "flex h-9 w-9 items-center justify-center rounded-xl ring-1",
@@ -362,6 +360,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
     <button
       role="tab"
       aria-selected={to_string(@tab == @value)}
+      aria-controls="sessions-table-panel"
       phx-click="switch_tab"
       phx-value-tab={@value}
       class={[
@@ -446,17 +445,18 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   defp sorted_rows(rows, sort_by, sort_dir) do
-    sorted =
-      Enum.sort_by(rows, fn row ->
+    Enum.sort_by(
+      rows,
+      fn row ->
         case sort_by do
-          :identifier -> String.downcase(row.identifier)
+          :identifier -> String.downcase(to_string(row.identifier))
           :status -> row.status
           :state -> String.downcase(to_string(row.state || ""))
-          _ -> String.downcase(row.identifier)
+          _ -> String.downcase(to_string(row.identifier))
         end
-      end)
-
-    if sort_dir == :desc, do: Enum.reverse(sorted), else: sorted
+      end,
+      sort_dir
+    )
   end
 
   defp paginated_rows(rows, page, per_page) do
@@ -487,6 +487,12 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   defp sort_icon(_current_by, _current_dir, _column), do: "hero-chevron-up-down"
+
+  defp aria_sort(current_by, current_dir, column) when current_by == column do
+    if current_dir == :asc, do: "ascending", else: "descending"
+  end
+
+  defp aria_sort(_current_by, _current_dir, _column), do: "none"
 
   defp parse_tab(tab) when is_binary(tab) do
     case String.downcase(String.trim(tab)) do
