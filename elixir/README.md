@@ -244,48 +244,145 @@ codex:
 
 ### GitHub Issues adapter
 
-- Config: use `tracker.kind: github` with required `tracker.provider.repo` in `owner/repo` form,
-  optional `token` (defaults to `GITHUB_TOKEN` and accepts `$VAR`), and optional `api_url`
-  (default `https://api.github.com`, HTTPS only). Set explicit `active_states` and
-  `terminal_states`; active entries may be `open` and terminal entries may be `closed`.
-- Reads and identity: polling is scoped to the configured repository; `issue.id` is the
-  repository issue number, `issue.identifier` is `GH-<number>`, hidden or deleted `404` issues are
-  omitted on refresh, and pull requests returned by the Issues API are not dispatchable.
-- Tool and auth: `github_api` accepts a relative REST `path` plus optional `params` and JSON
-  `body`; Symphony executes it host-side with the session-bound token, strips `GITHUB_TOKEN` and
-  configured `$VAR` token names from the Codex child, and leaves raw tool access limited by that
-  token's GitHub permissions.
+- Config: use `tracker.kind: github` with required `tracker.provider.repo` (`owner/repo`,
+  `^[^\s\/]+\/[^\s\/]+$`), optional `token` (defaults to `GITHUB_TOKEN` and accepts `$VAR`), and
+  optional `api_url` (default `https://api.github.com`, HTTPS only, trailing slash trimmed).
+  Set explicit `active_states` and `terminal_states`; allowed values are `open` (active) and
+  `closed` (terminal), normalized `trim + downcase`. `required_labels` stays under `tracker`. Validation
+  errors: `:missing_github_active_states`, `:missing_github_terminal_states`,
+  `:invalid_github_states`, `:missing_github_repo`, `:invalid_github_repo`,
+  `:missing_github_token`, `:invalid_github_api_url`.
+  Secret envs: `GITHUB_TOKEN` plus any `$VAR` referenced by `token`.
+- Scope and paging: candidate reads are scoped to the configured repo via
+  `GET /repos/{owner/repo}/issues` with `state` mapped from requested states (`open`/`closed`/`all`),
+  `per_page=100`, `page` incrementing until `<100` results, `sort=created` `direction=asc`.
+  Unsupported state sets return `{:ok, []}` without a request. ID refresh is per-issue
+  `GET /repos/{owner/repo}/issues/{number}` (IDs are numeric strings, `>0`), deduplicated, with `404`
+  omissions. Empty state/ID lists return `{:ok, []}` without a GitHub request.
+- Identity and normalization: `issue.id` is `Integer.to_string(number)`, `issue.identifier` is
+  `GH-<number>`, `issue.native_ref` is `%{"id","node_id","number","repo"}` filtered to non-nil or
+  `nil`. Records missing nonblank `number`/`title`/`state` are `nil`; priority is always `nil`;
+  `branch_name` is `nil`; `description` is `body`; `url` is `html_url`; `assignee_id` is
+  `assignee.login`; RFC 3339 `created_at`/`updated_at` parsed else `nil`; labels trimmed,
+  lowercased, deduplicated, blanks dropped; `blocked_by` is `[]`. State keeps GitHub spelling;
+  scheduler compares `trim+downcase`.
+- Dispatchability: `dispatchable` is `false` when the Issues payload contains `pull_request`, else
+  `true`. The generic scheduler then applies active/terminal states, required labels, claims, retries,
+  and concurrency.
+- Malformed handling: candidate pages drop malformed records with a warning and then filter to
+  requested states; ID refresh with a malformed record returns `{:error, :github_unknown_payload}`.
+  Non-list payloads or unsupported integer status also map to `:github_unknown_payload`.
+- Tool: `github_api` with input schema `{"method":"GET|POST|PATCH|PUT|DELETE","path":"/…","params"?:object,"body"?:any}`.
+  `path` must be a relative path starting with `/` without `://`. Symphony executes host-side with the
+  session-bound token/URL, strips `GITHUB_TOKEN` and configured `$VAR` names from the Codex child, and
+  does not scope raw tool calls to the configured repo. Mutations are provider-native; workflows own idempotency.
+- Responsibility and errors: `github_api` adds no retry, scope guard, or rate-limit policy. Read/config failures use
+  `{:error, :missing_github_repo}`, `{:error, :invalid_github_repo}`, `{:error, :missing_github_token}`,
+  `{:error, :invalid_github_api_url}`, `{:error, :invalid_github_issue_id}`,
+  `{:error, {:github_api_status, status}}`, `{:error, {:github_api_request, reason}}`,
+  `{:error, :github_unknown_payload}`, `{:error, :invalid_github_method}`, `{:error, :invalid_github_states}`.
+  Tool results are `{"success":bool,"output":json,"contentItems":[{"type":"inputText","text":output}]}`;
+  invalid args/missing auth/transport return `"success"=>false` with `{"error":{"message":…}}`, while
+  `status`+`body` responses preserve HTTP status (`success` is `200..299`). For portable reporting, map
+  missing/invalid repo/token/url/states to `tracker_config`/`tracker_auth`, `{:github_api_request,_}` to
+  `tracker_transport`, `{:github_api_status,status}` to `tracker_response` (`429` is `tracker_rate_limited`),
+  `:github_unknown_payload`/`:invalid_github_issue_id` to `tracker_payload`; logs carry provider detail.
 
 ### Jira Cloud adapter
 
-- Config: use `tracker.kind: jira` with provider `base_url`, `email`, `api_token`, and required
-  `project_key`; the first three default to `JIRA_BASE_URL`, `JIRA_EMAIL`, and `JIRA_API_TOKEN`
-  and accept `$VAR`. Set explicit Jira-native `active_states` and `terminal_states`.
-- Issues and reads: candidate reads and ID refreshes stay scoped to the configured project and
-  requested statuses; `issue.id` is Jira's immutable ID and `issue.identifier` is the issue key.
-- Blockers: inward `Blocks` links populate `blocked_by`; issues in Jira's `new` status category
-  wait until blockers reach configured terminal states, while in-progress categories keep running.
-- Tool: `jira_rest` sends relative `/rest/api/3/` requests host-side with configured Basic auth,
-  strips token environment variables from Codex, and can reach whatever the Jira credential can.
+- Config: use `tracker.kind: jira` with `tracker.provider.base_url` (defaults to `JIRA_BASE_URL`, accepts
+  `$VAR`, must be `https` without query/fragment), `email` (defaults to `JIRA_EMAIL`, accepts `$VAR`),
+  `api_token` (defaults to `JIRA_API_TOKEN`, accepts `$VAR`), and required `project_key` (accepts `$VAR`).
+  Set explicit Jira-native `active_states`/`terminal_states` (any nonblank strings; `trim+downcase` for dispatch).
+  Validation errors: `:missing_jira_active_states`, `:missing_jira_terminal_states`,
+  `:invalid_jira_states`, `:invalid_jira_base_url`, `:missing_jira_email`,
+  `:missing_jira_api_token`, `:missing_jira_project_key`. Secret envs: `JIRA_API_TOKEN` plus any
+  `$VAR` from `api_token`.
+- Scope and paging: candidate reads use `POST /rest/api/3/search/jql` with
+  `jql=project = "<key>" AND status IN ("<state>",…)` and `fields` including `summary,description,status,labels,assignee,created,updated,project,issuelinks`,
+  `maxResults=100`, paginating on `nextPageToken` until `isLast:true`; missing token when `isLast:false`
+  is `{:error, :jira_missing_next_page_token}`. ID refresh is `POST /rest/api/3/issue/bulkfetch` with
+  `{"issueIdsOrKeys":ids,"fields":[…]}` chunked to `100` per request, filtering to the configured project
+  (case-insensitive). Empty lists return `{:ok, []}` without a request.
+- Identity and normalization: `issue.id` is Jira's `id` string, `issue.identifier` is `key`,
+  `issue.native_ref` is currently `nil`. Records missing nonblank `id`/`key`/`summary`/`status.name` or with a
+  non-matching `project.key` are `nil`; `branch_name` and `priority` are `nil`; `description` is plain text
+  from `notes` or ADF (`text`/`hardBreak`/panel/mention/emoji/status/inlineCard attrs) blank→`nil`; `url` is
+  `base_url/browse/<key>`; `assignee_id` is `assignee.accountId`; labels trimmed/lowercased/deduped;
+  RFC 3339 `created`/`updated` (`+0000`→`+00:00` normalized) else `nil`. Blockers are inward `Blocks`
+  links → `%{id,identifier,state}` with `state` from `fields.status.name`. State keeps Jira spelling.
+- Dispatchability: when `status.statusCategory.key` is present, only `new` gates on blockers; otherwise
+  `Todo`/`To Do` gates. Gated issues are dispatchable only when every blocker state is in configured
+  `terminal_states` (`trim+downcase`). Otherwise `dispatchable` is `true`. The scheduler then applies the generic rules.
+- Malformed handling: candidate pages drop `nil` records with a warning and filter to requested states
+  (`trim+downcase`); ID refresh returns `{:error, :jira_unknown_payload}` for malformed/out-of-scope
+  requested records or missing `id`/`fields` structure. Omitted IDs (not requested / wrong project / 404-like)
+  are simply omitted.
+- Tool: `jira_rest` with schema `{"method":"GET|POST|PUT|DELETE","path":"/rest/api/3/…","query"?:object,"body"?:any}`.
+  Path must start with `/rest/api/3/` without `://`. Executed host-side with Basic `email:api_token`, stripping
+  `JIRA_API_TOKEN` + `$VAR` from the Codex child. Raw tool calls are not limited to the configured project.
+- Responsibility and errors: `jira_rest` adds no idempotency/retry/scope guard. Read failures use
+  `{:error, {:jira_api_status,status}}`, `{:error, {:jira_api_request,reason}}`,
+  `{:error, :jira_unknown_payload}`, `{:error, :jira_missing_next_page_token}`,
+  `{:error, :invalid_jira_method}` plus config errors above. Tool results are `{"success":status in 200..299, …}`;
+  invalid args/missing auth/transport map to `"success"=>false` with `{"error":{"message":…}}`. Map config/missing secret to
+  `tracker_config`/`tracker_auth`, request to `tracker_transport`, status to `tracker_response`
+  (`429`→`tracker_rate_limited`), unknown payload to `tracker_payload`, missing next token to `tracker_pagination`.
 
 ### Asana adapter
 
-- Config: use `tracker.kind: asana` with required `tracker.provider.project_gid`, optional
-  `endpoint` (default `https://app.asana.com/api/1.0`), and `api_key` (defaults to `ASANA_PAT` and
-  accepts `$VAR`); `active_states` and `terminal_states` are project section names.
-- Scope: Symphony polls tasks in the configured project, treats their section as state, and omits
-  deleted or out-of-project tasks during ID refreshes.
-- Tool: `asana_api` sends relative Asana REST requests host-side with the configured auth; Symphony
-  strips `ASANA_PAT` and configured token variables from the Codex child, while raw tool calls are
-  not limited to the configured project.
+- Config: use `tracker.kind: asana` with required `tracker.provider.project_gid`, optional `endpoint`
+  (default `https://app.asana.com/api/1.0`, HTTPS only, trailing slash trimmed), and `api_key`
+  (defaults to `ASANA_PAT`, accepts `$VAR`); `active_states`/`terminal_states` are section names (any
+  nonblank string). Validation errors: `:missing_asana_active_states`, `:missing_asana_terminal_states`,
+  `:invalid_asana_states`, `:missing_asana_project_gid`, `:missing_asana_api_key`,
+  `:invalid_asana_endpoint`. Secret envs: `ASANA_PAT` plus any `$VAR` from `api_key`.
+- Scope and paging: candidate reads `GET /projects/{project_gid}/tasks?limit=100&opt_fields=<task_fields>` including
+  `gid,name,notes,completed,resource_subtype,assignee.gid,tags.name,memberships.project.gid,memberships.section.gid,memberships.section.name,permalink_url,created_at,modified_at`,
+  paginating on `next_page.offset` until `next_page==nil`; map-without-offset is `{:error, :asana_missing_next_page_offset}`.
+  ID refresh is `GET /tasks/{gid}?opt_fields=…` per ID, `404` omitted, tasks lacking the configured
+  project membership omitted. Empty lists return `{:ok, []}` without a request; trimmed `project_gid`/`api_key` used.
+- Identity and normalization: `issue.id` is `gid`, `issue.identifier` is `ASANA-<gid>`,
+  `issue.native_ref` is `%{"task_gid","project_gid","section_gid"}` filtered. `state` is the section
+  `name` from the matching `memberships` entry (missing→`nil` and record dropped). Records missing
+  nonblank `gid`/`name`/`state` are `nil`; `priority`/`branch_name` are `nil`; `description` is `notes`
+  blank→`nil`; `assignee_id` is `assignee.gid`; labels from `tags[].name` trimmed/lowercased/deduped;
+  `blocked_by` is `[]`; timestamps RFC 3339 else `nil`; `url` is `permalink_url`.
+- Dispatchability: `dispatchable` is `completed==false and resource_subtype != "section"`. Scheduler applies the rest.
+- Malformed handling: candidate pages drop `nil` with warning and filter to requested states; ID refresh
+  with malformed `data` payload returns `{:error, :asana_unknown_payload}`; `404`/out-of-project are omissions.
+- Tool: `asana_api` with `{"method":"GET|POST|PUT|DELETE","path":"/…","query"?:object,"body"?:any}` (path must start
+  with `/` without `://`). Host-side Bearer auth, strip `ASANA_PAT`+`$VAR`. Raw tool not project-scoped.
+- Responsibility and errors: read errors `{:error, {:asana_api_status,status}}`, `{:error, {:asana_api_request,reason}}`,
+  `{:error, :asana_unknown_payload}`, `{:error, :asana_missing_next_page_offset}`, `{:error, :invalid_asana_method}` plus config errors.
+  Tool `{"success": status in 200..299}` with JSON `{"status","body"}`; invalid args/missing auth→`success false`. Portable mapping: config→`tracker_config`/`tracker_auth`, request→`tracker_transport`, status→`tracker_response` (`429`→`tracker_rate_limited`), payload→`tracker_payload`, pagination→`tracker_pagination`.
 
 ### GitLab adapter
 
-- Configure `tracker.kind: gitlab` with `tracker.provider.project_path`, optional `api_url`, and
-  `api_key` (default `GITLAB_PAT`); use `opened` and `closed` tracker states.
-- Symphony reads project issues by IID and exposes route-safe `GL-<iid>` identifiers.
-- `gitlab_api` forwards raw GitLab REST requests with host-side auth and keeps GitLab token env vars
-  out of the Codex child.
+- Config: use `tracker.kind: gitlab` with required `tracker.provider.project_path` (no whitespace), optional
+  `api_url` (default `https://gitlab.com/api/v4`, HTTPS only, trailing slash trimmed), and `api_key`
+  (defaults to `GITLAB_PAT`, accepts `$VAR`). Allowed `active_states` are `opened`, `terminal_states` are
+  `closed` (`trim+downcase`); validation errors: `:missing_gitlab_active_states`,
+  `:missing_gitlab_terminal_states`, `:invalid_gitlab_states`, `:missing_gitlab_project_path`,
+  `:invalid_gitlab_project_path`, `:missing_gitlab_api_key`, `:invalid_gitlab_api_url`. Secret envs
+  stripped from child: `GITLAB_PAT`, `GITLAB_ACCESS_TOKEN` plus any `$VAR` from `api_key` (provider default is only `GITLAB_PAT`).
+- Scope and paging: candidate reads `GET /projects/{encoded project_path}/issues?state=opened|closed|all&per_page=100&page=N&order_by=created_at&sort=asc`,
+  paging until `<100` results; state query mapped from `opened`/`closed`/`all`, unsupported sets → `{:ok, []}`.
+  ID refresh is per-IID `GET /projects/{encoded}/issues/{iid}` (numeric `>0`), deduped, `404` omitted.
+  Empty lists return `{:ok, []}` without a request.
+- Identity and normalization: `issue.id` is `Integer.to_string(iid)`, `issue.identifier` is `GL-<iid>`,
+  `issue.native_ref` is `%{"id","iid","project_id","project_path","references"}` filtered. Records missing
+  `iid>0`/nonblank `title`/`state` are `nil`; `priority`/`branch_name`/`blocked_by` are `nil`/`nil`/`[]`;
+  `description` is blank→`nil` from `description`; `assignee_id` prefers `assignees[0].id`→string else
+  `assignee.id`→string else `username`; labels trimmed/lowercased/deduped; timestamps RFC 3339 else `nil`;
+  `url` is `web_url`; state keeps GitLab spelling (`opened`/`closed`).
+- Dispatchability: `dispatchable` is always `true`; scheduler applies active/terminal/required_labels/claims.
+- Malformed handling: candidate pages drop `nil` with warning then filter to requested states; ID refresh malformed→`{:error, :gitlab_unknown_payload}`.
+- Tool: `gitlab_api` with `{"method":"GET|POST|PUT|DELETE","path":"/…","query"?:object,"body"?:any}` (path must be `/` without `://`).
+  Host-side `PRIVATE-TOKEN` auth, strip `GITLAB_PAT`/`GITLAB_ACCESS_TOKEN`+`$VAR`. Raw tool not project-scoped.
+- Responsibility and errors: reads use `{:error, {:gitlab_api_status,status}}`, `{:error, {:gitlab_api_request,reason}}`,
+  `{:error, :gitlab_unknown_payload}`, `{:error, :invalid_gitlab_issue_id}`, `{:error, :invalid_gitlab_method}` plus config errors.
+  Tool `{"success": status in 200..299}`; invalid args/missing auth→`success false`. Portable mapping: config→`tracker_config`/`tracker_auth`, request→`tracker_transport`, status→`tracker_response` (`429`→`tracker_rate_limited`), payload→`tracker_payload`, pagination not applicable (length-based paging).
 
 ## Web dashboard
 
