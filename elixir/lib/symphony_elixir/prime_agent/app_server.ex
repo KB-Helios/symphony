@@ -82,6 +82,8 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     emit_message(on_message, :session_started, %{session_id: session_id, harness: "prime"}, metadata)
     Logger.info("Prime session started for #{issue_context(issue)} session_id=#{session_id} workspace=#{workspace}")
 
+    :ok = send_prime_prompt(port, prompt, issue)
+
     case await_prime_completion(port, on_message, metadata) do
       {:ok, result} ->
         Logger.info("Prime session completed for #{issue_context(issue)} session_id=#{session_id}")
