@@ -140,7 +140,7 @@ defmodule SymphonyElixir.Orchestrator do
 
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
-        Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
+        Logger.info("Agent task finished for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier, issue_id)} session_id=#{session_id} reason=#{inspect(reason)}")
 
         notify_dashboard()
         {:noreply, state}
@@ -210,7 +210,8 @@ defmodule SymphonyElixir.Orchestrator do
     if input_required_blocker?(running_entry) do
       block_input_required_agent_down(state, issue_id, running_entry, session_id, :normal)
     else
-      Logger.info("Agent task completed for issue_id=#{issue_id} session_id=#{session_id}; scheduling active-state continuation check")
+      identifier = Map.get(running_entry, :identifier) || issue_id
+      Logger.info("Agent task completed for issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id}; scheduling active-state continuation check")
 
       state
       |> complete_issue(issue_id)
@@ -241,7 +242,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp retry_agent_down(state, issue_id, running_entry, session_id, reason) do
-    Logger.warning("Agent task exited for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
+    identifier = Map.get(running_entry, :identifier) || issue_id
+    Logger.warning("Agent task exited for issue_id=#{issue_id} issue_identifier=#{identifier} session_id=#{session_id} reason=#{inspect(reason)}; scheduling retry")
 
     next_attempt = next_retry_attempt_from_running(running_entry)
 
@@ -408,6 +410,12 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
+  @doc false
+  @spec reconcile_stalled_running_issues_for_test(term()) :: term()
+  def reconcile_stalled_running_issues_for_test(%State{} = state) do
+    reconcile_stalled_running_issues(state)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -512,7 +520,14 @@ defmodule SymphonyElixir.Orchestrator do
       if MapSet.member?(visible_issue_ids, issue_id) do
         state_acc
       else
-        Logger.info("Blocked issue no longer visible during state refresh: issue_id=#{issue_id}; releasing block")
+        case Map.get(state_acc.blocked, issue_id) do
+          %{identifier: identifier} when is_binary(identifier) and identifier != "" ->
+            Logger.info("Blocked issue no longer visible during state refresh: issue_id=#{issue_id} issue_identifier=#{identifier}; releasing block")
+
+          _ ->
+            Logger.info("Blocked issue no longer visible during state refresh: issue_id=#{issue_id} issue_identifier=unknown; releasing block")
+        end
+
         release_issue_claim(state_acc, issue_id)
       end
     end)
@@ -522,11 +537,11 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp log_missing_running_issue(%State{} = state, issue_id) when is_binary(issue_id) do
     case Map.get(state.running, issue_id) do
-      %{identifier: identifier} ->
+      %{identifier: identifier} when is_binary(identifier) and identifier != "" ->
         Logger.info("Issue no longer visible during running-state refresh: issue_id=#{issue_id} issue_identifier=#{identifier}; stopping active agent")
 
       _ ->
-        Logger.info("Issue no longer visible during running-state refresh: issue_id=#{issue_id}; stopping active agent")
+        Logger.info("Issue no longer visible during running-state refresh: issue_id=#{issue_id} issue_identifier=unknown; stopping active agent")
     end
   end
 
@@ -579,24 +594,47 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp reconcile_stalled_running_issues(%State{} = state) do
-    timeout_ms = Config.settings!().codex.stall_timeout_ms
-
-    cond do
-      timeout_ms <= 0 ->
+  defp terminate_running_issue_keep_claimed(%State{} = state, issue_id) do
+    case Map.get(state.running, issue_id) do
+      nil ->
         state
 
-      map_size(state.running) == 0 ->
-        state
+      %{pid: pid, ref: ref} = running_entry ->
+        state = record_session_completion_totals(state, running_entry)
+        stop_running_task(pid, ref, state.task_supervisor)
 
-      true ->
-        now = DateTime.utc_now()
+        %{
+          state
+          | running: Map.delete(state.running, issue_id),
+            blocked: Map.delete(state.blocked, issue_id),
+            retry_attempts: Map.delete(state.retry_attempts, issue_id)
+        }
 
-        Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
-          maybe_restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
-        end)
+      _ ->
+        %{state | running: Map.delete(state.running, issue_id)}
     end
   end
+
+  defp reconcile_stalled_running_issues(%State{} = state) do
+    if map_size(state.running) == 0 do
+      state
+    else
+      now = DateTime.utc_now()
+
+      Enum.reduce(state.running, state, fn {issue_id, running_entry}, state_acc ->
+        timeout_ms = stall_timeout_for_entry(running_entry)
+
+        if timeout_ms <= 0 do
+          state_acc
+        else
+          maybe_restart_stalled_issue(state_acc, issue_id, running_entry, now, timeout_ms)
+        end
+      end)
+    end
+  end
+
+  defp stall_timeout_for_entry(%{harness: "prime"}), do: Config.settings!().prime.stall_timeout_ms
+  defp stall_timeout_for_entry(_entry), do: Config.settings!().codex.stall_timeout_ms
 
   defp maybe_restart_stalled_issue(state, issue_id, running_entry, now, timeout_ms) do
     if Map.has_key?(state.blocked, issue_id) do
@@ -627,7 +665,7 @@ defmodule SymphonyElixir.Orchestrator do
         next_attempt = next_retry_attempt_from_running(running_entry)
 
         state
-        |> terminate_running_issue(issue_id, false)
+        |> terminate_running_issue_keep_claimed(issue_id)
         |> schedule_issue_retry(issue_id, next_attempt, %{
           identifier: identifier,
           issue_url: running_entry.issue.url,
@@ -1476,12 +1514,20 @@ defmodule SymphonyElixir.Orchestrator do
         }
       end)
 
+    running_seconds_sum =
+      state.running
+      |> Enum.map(fn {_id, m} -> running_seconds(m.started_at, now) end)
+      |> Enum.sum()
+
+    live_seconds = Map.get(state.codex_totals, :seconds_running, 0) + running_seconds_sum
+    live_codex_totals = Map.put(state.codex_totals, :seconds_running, max(0, live_seconds))
+
     {:reply,
      %{
        running: running,
        retrying: retrying,
        blocked: blocked,
-       codex_totals: state.codex_totals,
+       codex_totals: live_codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
        polling: %{
          checking?: state.poll_check_in_progress == true,

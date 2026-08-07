@@ -4,13 +4,13 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, Harness, PathSafety, SSH}
 
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
-  @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
+
   @type session :: %{
           port: port(),
           metadata: map(),
@@ -189,6 +189,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  # Deviation from SPEC §10.3: stderr is merged into the protocol stream via
+  # :stderr_to_stdout (standalone stderr pipe would require non-line mode or
+  # major rework). Merged stderr filtered via protocol_message_candidate?/1 —
+  # non-JSON lines are logged, JSON-like failures emit :malformed.
   defp start_port(workspace, nil, dynamic_tool_binding) do
     executable = System.find_executable("bash")
 
@@ -205,7 +209,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
             cd: String.to_charlist(workspace),
             env: tracker_secret_port_env(dynamic_tool_binding),
-            line: @port_line_bytes
+            line: Harness.port_line_bytes()
           ]
         )
 

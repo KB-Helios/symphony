@@ -17,9 +17,8 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   @behaviour SymphonyElixir.Harness
 
   require Logger
-  alias SymphonyElixir.{Config, PathSafety, SSH}
+  alias SymphonyElixir.{Config, Harness, PathSafety, SSH, Tracker}
 
-  @port_line_bytes 1_048_576
   @json_mode_flag "--mode json"
 
   @type session :: %{
@@ -28,7 +27,8 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
           workspace: Path.t(),
           worker_host: String.t() | nil,
           prime_settings: map(),
-          harness: String.t()
+          harness: String.t(),
+          dynamic_tool_binding: map()
         }
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
@@ -47,9 +47,10 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   def start_session(workspace, opts \\ []) do
     worker_host = Keyword.get(opts, :worker_host)
     prime_settings = Config.prime_settings()
+    dynamic_tool_binding = Tracker.bind_agent_tools()
 
     with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
-         {:ok, port} <- start_port(expanded_workspace, worker_host, prime_settings) do
+         {:ok, port} <- start_port(expanded_workspace, worker_host, prime_settings, dynamic_tool_binding) do
       metadata = port_metadata(port, worker_host)
 
       {:ok,
@@ -59,7 +60,8 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
          workspace: expanded_workspace,
          worker_host: worker_host,
          prime_settings: prime_settings,
-         harness: "prime"
+         harness: "prime",
+         dynamic_tool_binding: dynamic_tool_binding
        }}
     end
   end
@@ -82,15 +84,23 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     emit_message(on_message, :session_started, %{session_id: session_id, harness: "prime"}, metadata)
     Logger.info("Prime session started for #{issue_context(issue)} session_id=#{session_id} workspace=#{workspace}")
 
-    case await_prime_completion(port, on_message, metadata) do
-      {:ok, result} ->
-        Logger.info("Prime session completed for #{issue_context(issue)} session_id=#{session_id}")
-        {:ok, %{result: result, session_id: session_id, thread_id: session_id, turn_id: "1"}}
+    case send_prime_prompt(port, prompt, issue) do
+      :ok ->
+        case await_prime_completion(port, on_message, metadata) do
+          {:ok, result} ->
+            Logger.info("Prime session completed for #{issue_context(issue)} session_id=#{session_id}")
+            {:ok, %{result: result, session_id: session_id, thread_id: session_id, turn_id: "1"}}
 
-      {:error, reason} ->
-        Logger.warning("Prime session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
-        emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: reason, harness: "prime"}, metadata)
-        {:error, reason}
+          {:error, reason} ->
+            Logger.warning("Prime session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
+            emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: reason, harness: "prime"}, metadata)
+            {:error, reason}
+        end
+
+      {:error, :port_closed} = error ->
+        Logger.warning("Prime session port closed before prompt delivery for #{issue_context(issue)} session_id=#{session_id}")
+        emit_message(on_message, :turn_ended_with_error, %{session_id: session_id, reason: :port_closed, harness: "prime"}, metadata)
+        error
     end
   end
 
@@ -140,7 +150,10 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     end
   end
 
-  defp start_port(workspace, nil, _prime_settings) do
+  # Deviation from SPEC §10.3: stderr is merged into the protocol stream via
+  # :stderr_to_stdout. Merged stderr filtered via protocol_message_candidate?/1
+  # (prime) / handle_prime_line non-JSON branch — see codex/app_server.ex note.
+  defp start_port(workspace, nil, _prime_settings, dynamic_tool_binding) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -153,10 +166,10 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
             :binary,
             :exit_status,
             :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(local_launch_command())],
+            args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
             cd: String.to_charlist(workspace),
-            env: tracker_secret_port_env(),
-            line: @port_line_bytes
+            env: tracker_secret_port_env(dynamic_tool_binding),
+            line: Harness.port_line_bytes()
           ]
         )
 
@@ -164,35 +177,41 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     end
   end
 
-  defp start_port(workspace, worker_host, _prime_settings) when is_binary(worker_host) do
-    remote_command = remote_launch_command(workspace)
-    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
+  defp start_port(workspace, worker_host, _prime_settings, dynamic_tool_binding)
+       when is_binary(worker_host) do
+    remote_command = remote_launch_command(workspace, dynamic_tool_binding)
+    SSH.start_port(worker_host, remote_command, line: Harness.port_line_bytes())
   end
 
-  defp local_launch_command do
-    command = Config.prime_command()
-
-    if String.contains?(command, @json_mode_flag) do
-      "exec #{command}"
-    else
-      "exec #{command}"
-    end
+  defp local_launch_command(dynamic_tool_binding) do
+    [
+      tracker_secret_unset_command(dynamic_tool_binding),
+      "exec #{Config.prime_command()}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" && ")
   end
 
-  defp remote_launch_command(workspace) when is_binary(workspace) do
-    command = Config.prime_command()
-    "cd #{shell_escape(workspace)} && exec #{command}"
+  defp remote_launch_command(workspace, dynamic_tool_binding) when is_binary(workspace) do
+    [
+      "cd #{shell_escape(workspace)}",
+      tracker_secret_unset_command(dynamic_tool_binding),
+      "exec #{Config.prime_command()}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join(" && ")
   end
 
-  defp tracker_secret_port_env do
-    case Config.settings() do
-      {:ok, settings} ->
-        settings.tracker.secret_environment_names
-        |> valid_environment_names()
-        |> Enum.map(fn name -> {String.to_charlist(name), false} end)
+  defp tracker_secret_port_env(dynamic_tool_binding) do
+    dynamic_tool_binding.secret_environment_names
+    |> valid_environment_names()
+    |> Enum.map(fn name -> {String.to_charlist(name), false} end)
+  end
 
-      _ ->
-        []
+  defp tracker_secret_unset_command(dynamic_tool_binding) do
+    case dynamic_tool_binding.secret_environment_names |> valid_environment_names() do
+      [] -> nil
+      names -> "unset " <> Enum.join(names, " ")
     end
   end
 
@@ -200,6 +219,19 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     Enum.filter(names || [], fn name ->
       is_binary(name) and String.match?(name, ~r/^[A-Za-z_][A-Za-z0-9_]*$/)
     end)
+  end
+
+  # Exposed for testing — not part of Harness behaviour.
+  @spec remote_launch_command_for_test(Path.t()) :: String.t()
+  def remote_launch_command_for_test(workspace) when is_binary(workspace) do
+    binding = Tracker.bind_agent_tools()
+    remote_launch_command(workspace, binding)
+  end
+
+  @spec remote_launch_command_for_test(Path.t(), map()) :: String.t()
+  def remote_launch_command_for_test(workspace, binding)
+      when is_binary(workspace) and is_map(binding) do
+    remote_launch_command(workspace, binding)
   end
 
   defp port_metadata(port, worker_host) when is_port(port) do
@@ -229,8 +261,12 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
         %{"type" => "prompt", "message" => prompt, "id" => prime_request_id()}
       end
 
-    send_message(port, payload)
-    :ok
+    try do
+      send_message(port, payload)
+      :ok
+    rescue
+      ArgumentError -> {:error, :port_closed}
+    end
   end
 
   defp prime_request_id, do: "symphony-#{System.unique_integer([:positive])}"
@@ -326,6 +362,12 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
 
     emit_message(on_message, event, %{payload: payload, raw: payload_string, harness: "prime"}, metadata)
     :continue
+  end
+
+  defp translate_prime_event(type, payload, payload_string, _port, on_message, metadata)
+       when type in ["elicitation_request", "mcpServer/elicitation/request", "input_required", "needs_input"] do
+    emit_message(on_message, :turn_input_required, %{payload: payload, raw: payload_string, harness: "prime"}, metadata)
+    {:done, {:error, {:turn_input_required, payload}}}
   end
 
   defp translate_prime_event(_type, payload, payload_string, _port, on_message, metadata) do

@@ -167,7 +167,6 @@ defmodule SymphonyElixir.Config.Schema do
       |> validate_number(:max_turns, greater_than: 0)
       |> validate_number(:max_retry_backoff_ms, greater_than: 0)
       |> update_change(:max_concurrent_agents_by_state, &Schema.normalize_state_limits/1)
-      |> Schema.validate_state_limits(:max_concurrent_agents_by_state)
     end
   end
 
@@ -419,27 +418,23 @@ defmodule SymphonyElixir.Config.Schema do
   def normalize_state_limits(nil), do: %{}
 
   def normalize_state_limits(limits) when is_map(limits) do
+    require Logger
+
     Enum.reduce(limits, %{}, fn {state_name, limit}, acc ->
-      Map.put(acc, normalize_issue_state(to_string(state_name)), limit)
-    end)
-  end
+      key = normalize_issue_state(to_string(state_name))
 
-  @doc false
-  @spec validate_state_limits(Ecto.Changeset.t(), atom()) :: Ecto.Changeset.t()
-  def validate_state_limits(changeset, field) do
-    validate_change(changeset, field, fn ^field, limits ->
-      Enum.flat_map(limits, fn {state_name, limit} ->
-        cond do
-          state_name |> to_string() |> String.trim() == "" ->
-            [{field, "state names must not be blank"}]
+      cond do
+        key == "" ->
+          Logger.warning("Discarding malformed state limit entry: empty state name after normalization from #{inspect(state_name)}")
+          acc
 
-          not is_integer(limit) or limit <= 0 ->
-            [{field, "limits must be positive integers"}]
+        is_integer(limit) and limit > 0 ->
+          Map.put(acc, key, limit)
 
-          true ->
-            []
-        end
-      end)
+        true ->
+          Logger.warning("Discarding malformed state limit entry: invalid limit #{inspect(limit)} for state #{inspect(state_name)}")
+          acc
+      end
     end)
   end
 

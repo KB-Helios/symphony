@@ -1,0 +1,192 @@
+@import "tailwindcss";
+
+/* Scan project templates/components and SaladUI sources for utility classes. */
+@source "../js";
+@source "../../lib/symphony_elixir_web";
+@source "../../deps/salad_ui/lib";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Symphony — "Orchid" theme
+  Light: clean paper with violet-indigo primary, warm zinc neutrals.
+  Dark: deep zinc-950 with lifted zinc-900 cards and violet accent.
+  Inspired by Linear / shadcn violet — calm, premium, not loud.
+*/
+:root {
+  --background: 240 10% 98%;
+  --foreground: 240 10% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 10% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 10% 3.9%;
+  --primary: 262 83% 58%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 240 4.8% 95.9%;
+  --secondary-foreground: 240 5.9% 10%;
+  --muted: 240 4.8% 95.9%;
+  --muted-foreground: 240 3.8% 46.1%;
+  --accent: 262 30% 96%;
+  --accent-foreground: 262 44% 22%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 5.9% 90%;
+  --input: 240 5.9% 90%;
+  --ring: 262 83% 58%;
+  --radius: 0.875rem;
+  --chart-1: 262 83% 58%;
+  --chart-2: 239 84% 67%;
+  --chart-3: 280 65% 60%;
+  --chart-4: 199 89% 48%;
+  --chart-5: 24 95% 53%;
+}
+
+.dark {
+  --background: 240 10% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 240 6% 10%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 6% 10%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 263 70% 62%;
+  --primary-foreground: 240 5.9% 10%;
+  --secondary: 240 3.7% 15.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 3.7% 15.9%;
+  --muted-foreground: 240 5% 64.9%;
+  --accent: 263 30% 18%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 240 3.7% 15.9%;
+  --input: 240 3.7% 15.9%;
+  --ring: 263 70% 62%;
+  --chart-1: 263 70% 62%;
+  --chart-2: 239 84% 67%;
+  --chart-3: 280 65% 60%;
+  --chart-4: 199 89% 48%;
+  --chart-5: 24 95% 53%;
+}
+
+/* Map the HSL channels to Tailwind color utilities. */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: "Inter", "Geist", "SF Pro Text", "Helvetica Neue", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Subtle focus ring */
+  :focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring) / 0.35);
+  }
+
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 2px solid;
+      outline-color: Highlight;
+    }
+  }
+}
+
+.mono,
+.numeric {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+code,
+pre,
+.mono {
+  font-family: "Geist Mono", "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+/* Decorative mesh — used by layouts.ex via .symphony-mesh */
+.symphony-mesh {
+  background:
+    radial-gradient(600px 320px at 85% -10%, hsl(var(--primary) / 0.14), transparent 60%),
+    radial-gradient(520px 340px at 20% 0%, hsl(239 84% 67% / 0.1), transparent 60%),
+    radial-gradient(700px 380px at 70% 120%, hsl(280 65% 60% / 0.08), transparent 60%);
+}
+
+.dark .symphony-mesh {
+  background:
+    radial-gradient(680px 380px at 85% -10%, hsl(var(--primary) / 0.22), transparent 62%),
+    radial-gradient(560px 360px at 15% 0%, hsl(239 84% 67% / 0.14), transparent 62%),
+    radial-gradient(760px 420px at 70% 125%, hsl(280 65% 60% / 0.12), transparent 62%);
+}
+
+/* Elevated card polish — subtle ring + soft shadow */
+.card-elevated {
+  box-shadow:
+    0 1px 2px hsl(240 10% 3.9% / 0.06),
+    0 4px 12px hsl(240 10% 3.9% / 0.06);
+}
+
+.dark .card-elevated {
+  box-shadow:
+    0 1px 0 hsl(0 0% 100% / 0.04) inset,
+    0 4px 20px hsl(0 0% 0% / 0.35);
+}
+
+/* Thin scrollbar for tables / code blocks */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

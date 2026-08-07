@@ -8,6 +8,8 @@ defmodule SymphonyElixir.Tracker.Memory do
   alias SymphonyElixir.Tracker.Issue
 
   @spec fetch_issues_by_states([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_issues_by_states([]), do: {:ok, []}
+
   def fetch_issues_by_states(state_names) do
     normalized_states =
       state_names
@@ -21,6 +23,8 @@ defmodule SymphonyElixir.Tracker.Memory do
   end
 
   @spec fetch_issues_by_ids([String.t()]) :: {:ok, [Issue.t()]} | {:error, term()}
+  def fetch_issues_by_ids([]), do: {:ok, []}
+
   def fetch_issues_by_ids(issue_ids) do
     wanted_ids = MapSet.new(issue_ids)
 

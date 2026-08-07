@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
   Live observability dashboard for Symphony.
   """
 
-  use Phoenix.LiveView, layout: {SymphonyElixirWeb.Layouts, :app}
+  use SymphonyElixirWeb, :live_view
 
   alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
   @runtime_tick_ms 1_000
@@ -14,7 +14,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
       socket
       |> assign(:payload, load_payload())
       |> assign(:now, DateTime.utc_now())
-      |> assign(:harness_flash, nil)
+      |> assign(:current_path, "/")
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -35,14 +35,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
             {:noreply,
              socket
              |> assign(:payload, load_payload())
-             |> assign(:harness_flash, "Harness set to #{kind} for next dispatches.")}
+             |> put_flash(:info, "Harness set to #{kind} for next dispatches.")}
 
           {:error, reason} ->
-            {:noreply, assign(socket, :harness_flash, "Failed to update harness: #{inspect(reason)}")}
+            {:noreply, put_flash(socket, :error, "Failed to update harness: #{inspect(reason)}")}
         end
 
       _ ->
-        {:noreply, assign(socket, :harness_flash, "Unknown harness: #{inspect(harness)}")}
+        {:noreply, put_flash(socket, :error, "Unknown harness: #{inspect(harness)}")}
     end
   end
 
@@ -65,328 +65,422 @@ defmodule SymphonyElixirWeb.DashboardLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <section class="dashboard-shell">
-      <header class="hero-card">
-        <div class="hero-grid">
-          <div>
-            <p class="eyebrow">
-              Symphony Observability
-            </p>
-            <h1 class="hero-title">
-              Operations Dashboard
-            </h1>
-            <p class="hero-copy">
-              Current state, retry pressure, token usage, and orchestration health for the active Symphony runtime.
-            </p>
-          </div>
-
-          <div class="status-stack">
-            <form phx-change="select_harness" phx-submit="select_harness" class="harness-picker">
-              <label class="harness-picker-label" for="harness-select">Agent harness</label>
-              <select id="harness-select" name="harness" class="harness-select">
-                <option value="codex" selected={@payload[:harness] == "codex"}>Codex (default)</option>
-                <option value="prime" selected={@payload[:harness] == "prime"}>Prime Agent</option>
-              </select>
-              <span class="harness-picker-hint">Applies to next dispatches; use label `harness:prime` per issue.</span>
-              <%= if @harness_flash do %>
-                <span class="harness-flash"><%= @harness_flash %></span>
-              <% end %>
-            </form>
-            <span class="status-badge status-badge-live">
-              <span class="status-badge-dot"></span>
-              Live
-            </span>
-            <span class="status-badge status-badge-offline">
-              <span class="status-badge-dot"></span>
-              Offline
-            </span>
-          </div>
-        </div>
-      </header>
+    <div class="space-y-6">
+      <.header>
+        Operations
+        <:subtitle>
+          Live orchestration state — running sessions, retry pressure, token spend, and rate-limit health.
+        </:subtitle>
+        <:actions>
+          <.connection_badge />
+        </:actions>
+      </.header>
 
       <%= if @payload[:error] do %>
-        <section class="error-card">
-          <h2 class="error-title">
-            Snapshot unavailable
-          </h2>
-          <p class="error-copy">
-            <strong><%= @payload.error.code %>:</strong> <%= @payload.error.message %>
-          </p>
-        </section>
+        <.alert variant="destructive" class="card-elevated">
+          <.icon name="hero-exclamation-triangle" class="h-4 w-4" />
+          <.alert_title>Snapshot unavailable</.alert_title>
+          <.alert_description>
+            <span class="font-medium"><%= @payload.error.code %>:</span> <%= @payload.error.message %>
+          </.alert_description>
+        </.alert>
       <% else %>
-        <section class="metric-grid">
-          <article class="metric-card">
-            <p class="metric-label">Running</p>
-            <p class="metric-value numeric"><%= @payload.counts.running %></p>
-            <p class="metric-detail">Active issue sessions in the current runtime.</p>
-          </article>
+        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <.metric_card
+            label="Running"
+            value={@payload.counts.running}
+            detail="Active issue sessions"
+            icon="hero-bolt"
+            accent="violet"
+          />
+          <.metric_card
+            label="Retrying"
+            value={@payload.counts.retrying}
+            detail="Awaiting retry window"
+            icon="hero-clock"
+            accent="amber"
+          />
+          <.metric_card
+            label="Blocked"
+            value={@payload.counts.blocked}
+            detail="Paused for operator input"
+            icon="hero-pause-circle"
+            accent="rose"
+          />
+          <.metric_card
+            label="Total tokens"
+            value={format_int(@payload.codex_totals.total_tokens)}
+            detail={"In #{format_int(@payload.codex_totals.input_tokens)} · Out #{format_int(@payload.codex_totals.output_tokens)}"}
+            icon="hero-cpu-chip"
+            accent="zinc"
+          />
+          <.metric_card
+            label="Runtime"
+            value={format_runtime_seconds(total_runtime_seconds(@payload, @now))}
+            detail="Total Codex runtime"
+            icon="hero-timer"
+            accent="zinc"
+          />
+        </div>
 
-          <article class="metric-card">
-            <p class="metric-label">Retrying</p>
-            <p class="metric-value numeric"><%= @payload.counts.retrying %></p>
-            <p class="metric-detail">Issues waiting for the next retry window.</p>
-          </article>
+        <div class="grid gap-4 lg:grid-cols-5">
+          <.card class="card-elevated lg:col-span-2">
+            <.card_header class="pb-3">
+              <div class="flex items-center gap-2">
+                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15">
+                  <.icon name="hero-command-line" class="h-4 w-4" />
+                </span>
+                <div>
+                  <.card_title class="text-[15px] font-semibold">Agent harness</.card_title>
+                  <.card_description class="text-xs">
+                    Applies to next dispatches · per-issue <code class="mono rounded bg-muted px-1 py-0.5 text-[11px]">harness:prime</code>
+                  </.card_description>
+                </div>
+              </div>
+            </.card_header>
+            <.card_content>
+              <form phx-change="select_harness">
+                <label for="harness-select" class="sr-only">Harness</label>
+                <select
+                  id="harness-select"
+                  name="harness"
+                  class="flex h-10 w-full items-center justify-between rounded-xl border border-input bg-background px-3 py-2 text-sm ring-offset-background transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <option value="codex" selected={@payload[:harness] == "codex"}>Codex — default</option>
+                  <option value="prime" selected={@payload[:harness] == "prime"}>Prime Agent</option>
+                </select>
+                <p class="mt-2 text-xs text-muted-foreground">
+                  Current: <span class="font-medium text-foreground"><%= @payload[:harness] || "codex" %></span>
+                </p>
+              </form>
+            </.card_content>
+          </.card>
 
-          <article class="metric-card">
-            <p class="metric-label">Blocked</p>
-            <p class="metric-value numeric"><%= @payload.counts.blocked %></p>
-            <p class="metric-detail">Issues paused for operator input or approval.</p>
-          </article>
+          <.card class="card-elevated lg:col-span-3">
+            <.card_header class="pb-3">
+              <div class="flex items-center gap-2">
+                <span class="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 ring-1 ring-amber-500/15 dark:text-amber-400">
+                  <.icon name="hero-signal" class="h-4 w-4" />
+                </span>
+                <div>
+                  <.card_title class="text-[15px] font-semibold">Rate limits</.card_title>
+                  <.card_description class="text-xs">Latest upstream snapshot, when available.</.card_description>
+                </div>
+              </div>
+            </.card_header>
+            <.card_content>
+              <pre class="mono max-h-36 overflow-auto rounded-xl border border-border bg-muted/60 p-4 text-xs leading-relaxed"><%= pretty_value(@payload.rate_limits) %></pre>
+            </.card_content>
+          </.card>
+        </div>
 
-          <article class="metric-card">
-            <p class="metric-label">Total tokens</p>
-            <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
-            <p class="metric-detail numeric">
-              In <%= format_int(@payload.codex_totals.input_tokens) %> / Out <%= format_int(@payload.codex_totals.output_tokens) %>
-            </p>
-          </article>
+        <.sessions_card
+          title="Running sessions"
+          description="Active issues, last known agent activity, and token usage."
+          entries={@payload.running}
+          empty="No active sessions — the runtime is idle."
+          now={@now}
+          kind={:running}
+        />
 
-          <article class="metric-card">
-            <p class="metric-label">Runtime</p>
-            <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
-            <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
-          </article>
-        </section>
+        <.sessions_card
+          title="Blocked sessions"
+          description="Issues paused because the agent requested operator input or approval."
+          entries={@payload.blocked}
+          empty="No blocked sessions."
+          now={@now}
+          kind={:blocked}
+        />
 
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Rate limits</h2>
-              <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
-            </div>
-          </div>
-
-          <pre class="code-panel"><%= pretty_value(@payload.rate_limits) %></pre>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Running sessions</h2>
-              <p class="section-copy">Active issues, last known agent activity, and token usage.</p>
-            </div>
-          </div>
-
-          <%= if @payload.running == [] do %>
-            <p class="empty-state">No active sessions.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table data-table-running">
-                <colgroup>
-                  <col style="width: 12rem;" />
-                  <col style="width: 8rem;" />
-                  <col style="width: 7.5rem;" />
-                  <col style="width: 8.5rem;" />
-                  <col />
-                  <col style="width: 10rem;" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>State</th>
-                    <th>Harness</th>
-                    <th>Session</th>
-                    <th>Runtime / turns</th>
-                    <th>Codex update</th>
-                    <th>Tokens</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.running}>
-                    <td>
-                      <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={state_badge_class(entry.state)}>
-                        <%= entry.state %>
-                      </span>
-                    </td>
-                    <td>
-                      <span class={harness_badge_class(entry.harness)}>
-                        <%= harness_label(entry.harness) %>
-                      </span>
-                    </td>
-                    <td>
-                      <div class="session-stack">
-                        <%= if entry.session_id do %>
-                          <button
-                            type="button"
-                            class="subtle-button"
-                            data-label="Copy ID"
-                            data-copy={entry.session_id}
-                            onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
-                          >
-                            Copy ID
-                          </button>
-                        <% else %>
-                          <span class="muted">n/a</span>
-                        <% end %>
-                      </div>
-                    </td>
-                    <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
-                    <td>
-                      <div class="detail-stack">
-                        <span
-                          class="event-text"
-                          title={entry.last_message || to_string(entry.last_event || "n/a")}
-                        ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
-                        <span class="muted event-meta">
-                          <%= entry.last_event || "n/a" %>
-                          <%= if entry.last_event_at do %>
-                            · <span class="mono numeric"><%= entry.last_event_at %></span>
-                          <% end %>
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="token-stack numeric">
-                        <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
-                        <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Blocked sessions</h2>
-              <p class="section-copy">Issues paused because Codex requested operator input or approval.</p>
-            </div>
-          </div>
-
-          <%= if @payload.blocked == [] do %>
-            <p class="empty-state">No blocked sessions.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table" style="min-width: 760px;">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>State</th>
-                    <th>Harness</th>
-                    <th>Session</th>
-                    <th>Blocked at</th>
-                    <th>Last update</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.blocked}>
-                    <td>
-                      <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={state_badge_class(entry.state || "Blocked")}>
-                        <%= entry.state || "Blocked" %>
-                      </span>
-                    </td>
-                    <td>
-                      <span class={harness_badge_class(entry.harness)}>
-                        <%= harness_label(entry.harness) %>
-                      </span>
-                    </td>
-                    <td>
-                      <%= if entry.session_id do %>
-                        <button
-                          type="button"
-                          class="subtle-button"
-                          data-label="Copy ID"
-                          data-copy={entry.session_id}
-                          onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
-                        >
-                          Copy ID
-                        </button>
-                      <% else %>
-                        <span class="muted">n/a</span>
-                      <% end %>
-                    </td>
-                    <td class="mono"><%= entry.blocked_at || "n/a" %></td>
-                    <td>
-                      <div class="detail-stack">
-                        <span
-                          class="event-text"
-                          title={entry.last_message || to_string(entry.last_event || "n/a")}
-                        ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
-                        <span class="muted event-meta">
-                          <%= entry.last_event || "n/a" %>
-                          <%= if entry.last_event_at do %>
-                            · <span class="mono numeric"><%= entry.last_event_at %></span>
-                          <% end %>
-                        </span>
-                      </div>
-                    </td>
-                    <td><%= entry.error || "n/a" %></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
-        </section>
-
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Retry queue</h2>
-              <p class="section-copy">Issues waiting for the next retry window.</p>
-            </div>
-          </div>
-
-          <%= if @payload.retrying == [] do %>
-            <p class="empty-state">No issues are currently backing off.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table" style="min-width: 680px;">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>Attempt</th>
-                    <th>Due at</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.retrying}>
-                    <td>
-                      <div class="issue-stack">
-                        <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td><%= entry.attempt %></td>
-                    <td class="mono"><%= entry.due_at || "n/a" %></td>
-                    <td><%= entry.error || "n/a" %></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
-        </section>
+        <.retry_card entries={@payload.retrying} />
       <% end %>
-    </section>
+    </div>
     """
   end
 
-  defp load_payload do
-    Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+  # ---- components ----
+
+  defp connection_badge(assigns) do
+    ~H"""
+    <span class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
+      <span class="relative flex h-2 w-2">
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 [data-phx-main:not(.phx-connected)_&]:hidden">
+        </span>
+        <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 [data-phx-main:not(.phx-connected)_&]:bg-zinc-400">
+        </span>
+      </span>
+      <span class="[data-phx-main:not(.phx-connected)_&]:hidden">Live</span>
+      <span class="hidden [data-phx-main:not(.phx-connected)_&]:inline">Offline</span>
+    </span>
+    """
   end
 
-  defp orchestrator do
-    Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
+  attr(:label, :string, required: true)
+  attr(:value, :any, required: true)
+  attr(:detail, :string, default: nil)
+  attr(:icon, :string, default: "hero-sparkles")
+  attr(:accent, :string, default: "zinc")
+
+  defp metric_card(assigns) do
+    ~H"""
+    <.card class="card-elevated overflow-hidden">
+      <.card_header class="pb-2">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            <%= @label %>
+          </p>
+          <span class={[
+            "flex h-7 w-7 items-center justify-center rounded-lg ring-1",
+            @accent == "violet" && "bg-violet-500/10 text-violet-600 ring-violet-500/15 dark:text-violet-400",
+            @accent == "amber" && "bg-amber-500/10 text-amber-600 ring-amber-500/15 dark:text-amber-400",
+            @accent == "rose" && "bg-rose-500/10 text-rose-600 ring-rose-500/15 dark:text-rose-400",
+            @accent == "zinc" && "bg-muted text-muted-foreground ring-border"
+          ]}>
+            <.icon name={@icon} class="h-3.5 w-3.5" />
+          </span>
+        </div>
+      </.card_header>
+      <.card_content>
+        <p class="numeric text-[26px] font-semibold tracking-tight leading-none"><%= @value %></p>
+        <p :if={@detail} class="mt-2 text-xs leading-relaxed text-muted-foreground"><%= @detail %></p>
+      </.card_content>
+    </.card>
+    """
   end
 
-  defp snapshot_timeout_ms do
-    Endpoint.config(:snapshot_timeout_ms) || 15_000
+  attr(:title, :string, required: true)
+  attr(:description, :string, required: true)
+  attr(:entries, :list, required: true)
+  attr(:empty, :string, required: true)
+  attr(:now, DateTime, required: true)
+  attr(:kind, :atom, required: true)
+
+  defp sessions_card(assigns) do
+    ~H"""
+    <.card class="card-elevated overflow-hidden">
+      <.card_header class="border-b border-border/60 bg-muted/20">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <.card_title class="text-[15px] font-semibold"><%= @title %></.card_title>
+            <.card_description class="text-xs"><%= @description %></.card_description>
+          </div>
+          <span class={[
+            "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+            @kind == :running && "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/40 dark:text-violet-300",
+            @kind == :blocked && "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300"
+          ]}>
+            <%= length(@entries) %> <%= if length(@entries) == 1, do: "session", else: "sessions" %>
+          </span>
+        </div>
+      </.card_header>
+      <.card_content class="p-0">
+        <%= if @entries == [] do %>
+          <div class="p-6">
+            <.empty_state message={@empty} />
+          </div>
+        <% else %>
+          <div class="overflow-x-auto">
+            <.table>
+              <.table_header>
+                <.table_row class="hover:bg-transparent">
+                  <.table_head class="text-[11px] uppercase tracking-wide">Issue</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">State</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Harness</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Session</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide"><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Last update</.table_head>
+                  <%= if @kind == :running do %>
+                    <.table_head class="text-[11px] uppercase tracking-wide">Tokens</.table_head>
+                  <% else %>
+                    <.table_head class="text-[11px] uppercase tracking-wide">Error</.table_head>
+                  <% end %>
+                </.table_row>
+              </.table_header>
+              <.table_body>
+                <.table_row
+                  :for={entry <- @entries}
+                  class="group transition-colors hover:bg-muted/40"
+                >
+                  <.table_cell>
+                    <div class="grid gap-1">
+                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <.link
+                        navigate={"/sessions/#{entry.issue_identifier}"}
+                        class="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline"
+                      >
+                        View details <.icon name="hero-arrow-right" class="h-3 w-3" />
+                      </.link>
+                    </div>
+                  </.table_cell>
+                  <.table_cell>
+                    <.state_badge state={entry.state || "Blocked"} />
+                  </.table_cell>
+                  <.table_cell>
+                    <.harness_badge harness={entry.harness} />
+                  </.table_cell>
+                  <.table_cell>
+                    <%= if entry.session_id do %>
+                      <.button
+                        variant="outline"
+                        size="sm"
+                        data-label="Copy ID"
+                        data-copy={entry.session_id}
+                        phx-hook="ClipboardCopy"
+                        id={"copy-#{@kind}-#{entry.issue_identifier}"}
+                        class="h-7 rounded-full px-3 text-xs"
+                      >
+                        Copy ID
+                      </.button>
+                    <% else %>
+                      <span class="text-xs text-muted-foreground">—</span>
+                    <% end %>
+                  </.table_cell>
+                  <.table_cell class="numeric whitespace-nowrap text-xs">
+                    <%= if @kind == :running do %>
+                      <%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %>
+                    <% else %>
+                      <span class="mono"><%= entry.blocked_at || "—" %></span>
+                    <% end %>
+                  </.table_cell>
+                  <.table_cell>
+                    <div class="grid max-w-[22rem] gap-0.5">
+                      <span
+                        class="truncate text-sm font-medium"
+                        title={entry.last_message || to_string(entry.last_event || "n/a")}
+                      >
+                        <%= entry.last_message || to_string(entry.last_event || "n/a") %>
+                      </span>
+                      <span class="truncate text-xs text-muted-foreground">
+                        <%= entry.last_event || "n/a" %>
+                        <span :if={entry.last_event_at} class="mono">· <%= entry.last_event_at %></span>
+                      </span>
+                    </div>
+                  </.table_cell>
+                  <%= if @kind == :running do %>
+                    <.table_cell>
+                      <div class="numeric grid gap-0.5 text-sm">
+                        <span class="font-medium">Total <%= format_int(entry.tokens.total_tokens) %></span>
+                        <span class="text-xs text-muted-foreground">
+                          In <%= format_int(entry.tokens.input_tokens) %> · Out <%= format_int(entry.tokens.output_tokens) %>
+                        </span>
+                      </div>
+                    </.table_cell>
+                  <% else %>
+                    <.table_cell class="max-w-48 truncate text-sm"><%= entry.error || "—" %></.table_cell>
+                  <% end %>
+                </.table_row>
+              </.table_body>
+            </.table>
+          </div>
+        <% end %>
+      </.card_content>
+    </.card>
+    """
+  end
+
+  attr(:entries, :list, required: true)
+
+  defp retry_card(assigns) do
+    ~H"""
+    <.card class="card-elevated overflow-hidden">
+      <.card_header class="border-b border-border/60 bg-muted/20">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <.card_title class="text-[15px] font-semibold">Retry queue</.card_title>
+            <.card_description class="text-xs">Issues waiting for the next retry window.</.card_description>
+          </div>
+          <span class="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
+            <%= length(@entries) %> queued
+          </span>
+        </div>
+      </.card_header>
+      <.card_content class="p-0">
+        <%= if @entries == [] do %>
+          <div class="p-6">
+            <.empty_state message="No issues are currently backing off." />
+          </div>
+        <% else %>
+          <div class="overflow-x-auto">
+            <.table>
+              <.table_header>
+                <.table_row class="hover:bg-transparent">
+                  <.table_head class="text-[11px] uppercase tracking-wide">Issue</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Attempt</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Due at</.table_head>
+                  <.table_head class="text-[11px] uppercase tracking-wide">Error</.table_head>
+                </.table_row>
+              </.table_header>
+              <.table_body>
+                <.table_row :for={entry <- @entries} class="hover:bg-muted/40">
+                  <.table_cell>
+                    <div class="grid gap-1">
+                      <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                      <.link
+                        navigate={"/sessions/#{entry.issue_identifier}"}
+                        class="text-xs font-medium text-primary hover:underline"
+                      >
+                        View details
+                      </.link>
+                    </div>
+                  </.table_cell>
+                  <.table_cell class="numeric text-xs">
+                    <span class="inline-flex rounded-full bg-muted px-2 py-1 text-xs font-medium">#<%= entry.attempt %></span>
+                  </.table_cell>
+                  <.table_cell class="mono whitespace-nowrap text-xs"><%= entry.due_at || "—" %></.table_cell>
+                  <.table_cell class="max-w-64 truncate text-sm"><%= entry.error || "—" %></.table_cell>
+                </.table_row>
+              </.table_body>
+            </.table>
+          </div>
+        <% end %>
+      </.card_content>
+    </.card>
+    """
+  end
+
+  attr(:message, :string, required: true)
+
+  defp empty_state(assigns) do
+    ~H"""
+    <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-10 text-center">
+      <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+        <.icon name="hero-inbox" class="h-5 w-5" />
+      </span>
+      <p class="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground"><%= @message %></p>
+    </div>
+    """
+  end
+
+  attr(:state, :string, required: true)
+
+  defp state_badge(assigns) do
+    normalized = String.downcase(to_string(assigns.state))
+
+    variant =
+      cond do
+        String.contains?(normalized, ["progress", "running", "active"]) -> "default"
+        String.contains?(normalized, ["blocked", "error", "failed"]) -> "destructive"
+        String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "secondary"
+        true -> "outline"
+      end
+
+    assigns = assign(assigns, :variant, variant)
+
+    ~H"""
+    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium"><%= @state %></.badge>
+    """
+  end
+
+  attr(:harness, :string, default: nil)
+
+  defp harness_badge(assigns) do
+    label = assigns.harness || "codex"
+    variant = if assigns.harness == "prime", do: "secondary", else: "outline"
+    assigns = assigns |> assign(:label, label) |> assign(:variant, variant)
+
+    ~H"""
+    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide"><%= @label %></.badge>
+    """
   end
 
   attr(:identifier, :string, required: true)
@@ -397,17 +491,25 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
     ~H"""
     <%= if @href do %>
-      <a
-        class="issue-id issue-id-link"
+      <.link
         href={@href}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={"Open #{@identifier} in the issue tracker"}
-      ><%= @identifier %></a>
+        class="font-semibold tracking-tight underline decoration-border underline-offset-4 hover:decoration-foreground"
+      >
+        <%= @identifier %>
+      </.link>
     <% else %>
-      <span class="issue-id"><%= @identifier %></span>
+      <span class="font-semibold tracking-tight"><%= @identifier %></span>
     <% end %>
     """
+  end
+
+  # ---- data / formatting helpers ----
+
+  defp load_payload do
+    Presenter.state_payload(SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
   end
 
   defp external_issue_url(url) when is_binary(url) do
@@ -436,8 +538,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
       end)
   end
 
-  defp format_runtime_and_turns(started_at, turn_count, now) when is_integer(turn_count) and turn_count > 0 do
-    "#{format_runtime_seconds(runtime_seconds_from_started_at(started_at, now))} / #{turn_count}"
+  defp format_runtime_and_turns(started_at, turn_count, now)
+       when is_integer(turn_count) and turn_count > 0 do
+    turn_label = if turn_count == 1, do: "turn", else: "turns"
+    "#{format_runtime_seconds(runtime_seconds_from_started_at(started_at, now))} · #{turn_count} #{turn_label}"
   end
 
   defp format_runtime_and_turns(started_at, _turn_count, now),
@@ -471,39 +575,13 @@ defmodule SymphonyElixirWeb.DashboardLive do
     |> String.reverse()
   end
 
-  defp format_int(_value), do: "n/a"
-
-  defp state_badge_class(state) do
-    base = "state-badge"
-    normalized = state |> to_string() |> String.downcase()
-
-    cond do
-      String.contains?(normalized, ["progress", "running", "active"]) -> "#{base} state-badge-active"
-      String.contains?(normalized, ["blocked", "error", "failed"]) -> "#{base} state-badge-danger"
-      String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "#{base} state-badge-warning"
-      true -> base
-    end
-  end
-
-  defp harness_label(harness) do
-    case harness do
-      "prime" -> "prime"
-      _ -> "codex"
-    end
-  end
-
-  defp harness_badge_class(harness) do
-    case harness do
-      "prime" -> "harness-badge harness-badge-prime"
-      _ -> "harness-badge harness-badge-codex"
-    end
-  end
+  defp format_int(_value), do: "—"
 
   defp schedule_runtime_tick do
     Process.send_after(self(), :runtime_tick, @runtime_tick_ms)
   end
 
-  defp pretty_value(nil), do: "n/a"
+  defp pretty_value(nil), do: "—"
   defp pretty_value(value), do: inspect(value, pretty: true, limit: :infinity)
 
   defp update_workflow_harness(kind) do
@@ -514,7 +592,9 @@ defmodule SymphonyElixirWeb.DashboardLive do
         if String.contains?(content, "harness:") do
           Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, content, "harness:\n  kind: #{kind}\n")
           |> then(fn c ->
-            if String.contains?(c, "kind: #{kind}"), do: c, else: String.replace(c, ~r/harness:\s*\n/, "harness:\n  kind: #{kind}\n", global: false)
+            if String.contains?(c, "kind: #{kind}"),
+              do: c,
+              else: String.replace(c, ~r/harness:\s*\n/, "harness:\n  kind: #{kind}\n", global: false)
           end)
         else
           String.replace(content, "---\n", "---\nharness:\n  kind: #{kind}\n", global: false)

@@ -9,9 +9,13 @@ defmodule SymphonyElixir.Harness do
   alias SymphonyElixir.Config
 
   @supported_harnesses ["codex", "prime"]
+  @port_line_bytes 10_485_760
 
   @type harness_kind :: String.t()
   @type session :: map()
+
+  @spec port_line_bytes() :: pos_integer()
+  def port_line_bytes, do: @port_line_bytes
 
   @callback start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
   @callback run_turn(session(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}

@@ -75,6 +75,10 @@ defmodule SymphonyElixir.MixProject do
       {:phoenix, "~> 1.8.0"},
       {:phoenix_html, "~> 4.2"},
       {:phoenix_live_view, "~> 1.1.0"},
+      {:esbuild, "~> 0.9", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.4", runtime: Mix.env() == :dev},
+      {:heroicons, github: "tailwindlabs/heroicons", tag: "v2.2.0", sparse: "optimized", app: false, compile: false, depth: 1},
+      {:salad_ui, "~> 0.14"},
       {:req, "~> 0.5"},
       {:jason, "~> 1.4"},
       {:yaml_elixir, "~> 2.12"},
@@ -88,9 +92,19 @@ defmodule SymphonyElixir.MixProject do
 
   defp aliases do
     [
-      setup: ["deps.get"],
+      setup: ["deps.get", "assets.setup", "assets.build"],
       build: ["escript.build"],
-      lint: ["specs.check", "credo --strict"]
+      lint: ["specs.check", "credo --strict"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": [
+        "tailwind default --minify",
+        "esbuild default"
+      ],
+      "assets.deploy": [
+        "tailwind default --minify",
+        "esbuild default",
+        "phx.digest"
+      ]
     ]
   end
 
