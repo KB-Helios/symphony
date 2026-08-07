@@ -29,6 +29,8 @@ defmodule SymphonyElixirWeb.CoreComponents do
       id={@id}
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
+      aria-live="polite"
+      aria-atomic="true"
       class={[
         "pointer-events-auto w-full max-w-sm rounded-xl border p-4 shadow-lg backdrop-blur",
         @kind == :info &&

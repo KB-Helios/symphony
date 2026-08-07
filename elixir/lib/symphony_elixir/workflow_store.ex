@@ -62,6 +62,124 @@ defmodule SymphonyElixir.WorkflowStore do
     end
   end
 
+  @spec update_harness(String.t()) :: :ok | {:error, term()}
+  def update_harness(kind) when is_binary(kind) do
+    normalized = kind |> String.trim() |> String.downcase()
+
+    if normalized not in ["codex", "prime"] do
+      {:error, :invalid_harness}
+    else
+      path = Workflow.workflow_file_path()
+
+      with {:ok, content} <- File.read(path),
+           {:ok, updated} <- build_updated_content(content, normalized),
+           :ok <- atomic_write(path, updated) do
+        force_reload()
+        :ok
+      else
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def update_harness(_kind), do: {:error, :invalid_harness}
+
+  defp build_updated_content(content, kind) do
+    case split_front_matter(content) do
+      {:ok, {front_matter, body, delimiter}} ->
+        with :ok <- validate_front_matter_yaml(front_matter) do
+          updated_front = update_front_matter_string(front_matter, kind)
+          {:ok, delimiter <> updated_front <> delimiter <> body}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp split_front_matter(content) do
+    lines = String.split(content, ~r/\R/, trim: false)
+
+    case lines do
+      ["---" | tail] ->
+        {front, rest} = Enum.split_while(tail, &(&1 != "---"))
+
+        case rest do
+          ["---" | prompt_lines] ->
+            front_matter = Enum.join(front, "\n")
+            body = Enum.join(prompt_lines, "\n")
+            {:ok, {front_matter, body, "---\n"}}
+
+          _ ->
+            {:error, {:workflow_parse_error, {:unterminated_front_matter, Enum.join(tail, "\n")}}}
+        end
+
+      _ ->
+        {:ok, {"", content, "---\n"}}
+    end
+  end
+
+  defp validate_front_matter_yaml(front_matter) do
+    yaml = String.trim(front_matter)
+
+    if yaml == "" do
+      :ok
+    else
+      if Code.ensure_loaded?(YamlElixir) and function_exported?(YamlElixir, :read_from_string, 1) do
+        case YamlElixir.read_from_string(yaml) do
+          {:ok, decoded} when is_map(decoded) -> :ok
+          {:ok, _} -> {:error, :workflow_front_matter_not_a_map}
+          {:error, reason} -> {:error, {:workflow_parse_error, reason}}
+        end
+      else
+        :ok
+      end
+    end
+  end
+
+  defp update_front_matter_string(front_matter, kind) do
+    trimmed = String.trim(front_matter)
+
+    cond do
+      trimmed == "" ->
+        "harness:\n  kind: #{kind}\n"
+
+      String.contains?(front_matter, "harness:") ->
+        updated =
+          Regex.replace(~r/harness:\s*\n(?:[ \t]+kind:.*\n?)*/, front_matter, "harness:\n  kind: #{kind}\n")
+
+        if String.contains?(updated, "kind: #{kind}") do
+          ensure_trailing_newline(updated)
+        else
+          Regex.replace(~r/harness:\s*\n/, front_matter, "harness:\n  kind: #{kind}\n")
+          |> ensure_trailing_newline()
+        end
+
+      true ->
+        base = front_matter |> String.trim_trailing() |> ensure_trailing_newline()
+        base <> "harness:\n  kind: #{kind}\n"
+    end
+  end
+
+  defp ensure_trailing_newline(""), do: ""
+
+  defp ensure_trailing_newline(str) do
+    if String.ends_with?(str, "\n"), do: str, else: str <> "\n"
+  end
+
+  defp atomic_write(path, content) do
+    tmp = path <> ".tmp.#{:erlang.system_time(:millisecond)}.#{:erlang.unique_integer([:positive])}"
+
+    with :ok <- File.write(tmp, content),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, reason} ->
+        _ = File.rm(tmp)
+        {:error, reason}
+    end
+  end
+
   @impl true
   def init(_opts) do
     case load_state(Workflow.workflow_file_path()) do

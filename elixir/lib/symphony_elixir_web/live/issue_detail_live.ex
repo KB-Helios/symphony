@@ -6,7 +6,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   use SymphonyElixirWeb, :live_view
 
   alias Phoenix.LiveView.JS
-  alias SymphonyElixirWeb.{Endpoint, ObservabilityPubSub, Presenter}
+  alias SymphonyElixirWeb.{ObservabilityPubSub, Presenter}
 
   @impl true
   def mount(%{"identifier" => identifier}, _session, socket) do
@@ -83,6 +83,15 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         <span class="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
           Harness: <span class="ml-1 font-semibold"><%= harness(@issue) %></span>
         </span>
+        <.link
+          :if={external_issue_url(issue_url(@issue))}
+          href={external_issue_url(issue_url(@issue))}
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
+        >
+          Open in tracker <.icon name="hero-arrow-top-right-on-square" class="h-3.5 w-3.5" />
+        </.link>
       </:actions>
     </.header>
 
@@ -126,9 +135,51 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         <.card_description class="text-xs">Where the agent operates for this issue.</.card_description>
       </.card_header>
       <.card_content class="space-y-3 p-6">
-        <.detail_row label="Path" value={@issue.workspace.path} mono />
+        <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:items-baseline">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Path</p>
+          <div class="flex flex-wrap items-center gap-2">
+            <p class="mono break-words text-xs leading-relaxed"><%= @issue.workspace.path %></p>
+            <.button
+              variant="outline"
+              size="sm"
+              class="rounded-full"
+              aria-label={"Copy workspace path for #{@identifier}"}
+              phx-hook="ClipboardCopy"
+              data-copy={@issue.workspace.path}
+              data-label="Copy"
+              id={"copy-workspace-#{@identifier}"}
+            >
+              Copy
+            </.button>
+          </div>
+        </div>
         <.detail_row label="Host" value={@issue.workspace.host || "local"} mono />
         <.detail_row :if={@issue.last_error} label="Last error" value={@issue.last_error} />
+      </.card_content>
+    </.card>
+
+    <.card :if={@issue.blocked} class="card-elevated overflow-hidden">
+      <.card_header class="border-b border-border/60 bg-muted/20">
+        <.card_title class="text-[15px] font-semibold">Blocked context</.card_title>
+        <.card_description class="text-xs">Waiting for operator input.</.card_description>
+      </.card_header>
+      <.card_content class="space-y-3 p-6">
+        <.detail_row label="Error" value={@issue.blocked.error || "—"} />
+        <.detail_row label="Blocked at" value={@issue.blocked.blocked_at || "—"} mono />
+        <.detail_row :if={@issue.blocked.session_id} label="Session ID" value={@issue.blocked.session_id} mono />
+        <.detail_row :if={@issue.blocked.state} label="State" value={@issue.blocked.state} />
+      </.card_content>
+    </.card>
+
+    <.card :if={@issue.retry} class="card-elevated overflow-hidden">
+      <.card_header class="border-b border-border/60 bg-muted/20">
+        <.card_title class="text-[15px] font-semibold">Retry context</.card_title>
+        <.card_description class="text-xs">Backing off before the next attempt.</.card_description>
+      </.card_header>
+      <.card_content class="space-y-3 p-6">
+        <.detail_row label="Attempt" value={to_string(@issue.retry.attempt)} mono />
+        <.detail_row label="Due at" value={@issue.retry.due_at || "—"} mono />
+        <.detail_row label="Error" value={@issue.retry.error || "—"} />
       </.card_content>
     </.card>
 
@@ -143,14 +194,25 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
           <.detail_row label="State" value={@issue.running.state || "—"} />
           <.detail_row label="Turns" value={to_string(@issue.running.turn_count)} mono />
           <.detail_row label="Started" value={@issue.running.started_at || "—"} mono />
-          <.detail_row label="Last event" value={@issue.running.last_event || "—"} />
+          <.detail_row label="Last event" value={to_string(@issue.running.last_event || "—")} />
           <.detail_row label="Last message" value={@issue.running.last_message || "—"} />
         </div>
-        <div class="grid gap-1 rounded-xl border border-border bg-muted/40 p-4">
+        <div class="rounded-xl border border-border bg-muted/40 p-4">
           <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Tokens</p>
-          <p class="numeric text-sm font-medium">
-            Total <%= @issue.running.tokens.total_tokens || 0 %> · In <%= @issue.running.tokens.input_tokens || 0 %> · Out <%= @issue.running.tokens.output_tokens || 0 %>
-          </p>
+          <div class="mt-3 grid grid-cols-3 gap-3">
+            <div>
+              <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">In</p>
+              <p class="numeric mt-1 text-sm font-semibold"><%= @issue.running.tokens.input_tokens || 0 %></p>
+            </div>
+            <div>
+              <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Out</p>
+              <p class="numeric mt-1 text-sm font-semibold"><%= @issue.running.tokens.output_tokens || 0 %></p>
+            </div>
+            <div>
+              <p class="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Total</p>
+              <p class="numeric mt-1 text-sm font-semibold"><%= @issue.running.tokens.total_tokens || 0 %></p>
+            </div>
+          </div>
         </div>
       </.card_content>
     </.card>
@@ -171,17 +233,19 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
             </div>
           </div>
         <% else %>
-          <ul class="divide-y divide-border/60">
-            <li :for={event <- @issue.recent_events} class="flex gap-3 px-6 py-4">
-              <span class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/15">
-                <.icon name="hero-bolt" class="h-3.5 w-3.5" />
-              </span>
-              <div class="min-w-0 flex-1">
+          <div class="p-6">
+            <ol class="relative ml-2 border-l border-border pl-6">
+              <li
+                :for={event <- sorted_events(@issue.recent_events)}
+                class="relative mb-6 last:mb-0"
+              >
+                <span class="absolute -left-[25px] top-1 h-2.5 w-2.5 rounded-full bg-primary ring-4 ring-card">
+                </span>
                 <p class="text-sm font-medium leading-relaxed"><%= event.message || event.event || "event" %></p>
                 <p class="mono mt-1 text-xs text-muted-foreground"><%= event.at %></p>
-              </div>
-            </li>
-          </ul>
+              </li>
+            </ol>
+          </div>
         <% end %>
       </.card_content>
     </.card>
@@ -205,6 +269,45 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
     (issue.running && issue.running.harness) ||
       (issue.blocked && issue.blocked.harness) ||
       "codex"
+  end
+
+  defp issue_url(issue) when is_map(issue) do
+    Map.get(issue, :issue_url) ||
+      Map.get(issue, "issue_url") ||
+      issue_url_from_nested(Map.get(issue, :running) || Map.get(issue, "running")) ||
+      issue_url_from_nested(Map.get(issue, :retry) || Map.get(issue, "retry")) ||
+      issue_url_from_nested(Map.get(issue, :blocked) || Map.get(issue, "blocked"))
+  end
+
+  defp issue_url(_issue), do: nil
+
+  defp issue_url_from_nested(nil), do: nil
+
+  defp issue_url_from_nested(entry) when is_map(entry) do
+    Map.get(entry, :issue_url) || Map.get(entry, "issue_url")
+  end
+
+  defp external_issue_url(url) when is_binary(url) do
+    url = String.trim(url)
+
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host}
+      when scheme in ["http", "https"] and is_binary(host) and host != "" ->
+        url
+
+      _ ->
+        nil
+    end
+  end
+
+  defp external_issue_url(_url), do: nil
+
+  defp sorted_events(events) when is_list(events) do
+    Enum.sort_by(
+      events,
+      fn event -> Map.get(event, :at) || Map.get(event, "at") || "" end,
+      :desc
+    )
   end
 
   defp load_issue(identifier) do

@@ -31,6 +31,8 @@ defmodule SymphonyElixirWeb.Router do
   end
 
   scope "/", SymphonyElixirWeb do
+    get("/api/v1/health", ObservabilityApiController, :health)
+    match(:*, "/api/v1/health", ObservabilityApiController, :method_not_allowed)
     get("/api/v1/state", ObservabilityApiController, :state)
     post("/api/v1/harness", ObservabilityApiController, :update_harness)
 

@@ -15,15 +15,40 @@ const ClipboardCopy = {
     this.handle = () => {
       const text = this.el.dataset.copy || "";
       const label = this.el.dataset.label || this.el.textContent;
-      navigator.clipboard?.writeText(text).then(() => {
-        this.el.textContent = "Copied";
+      const show = (msg) => {
+        this.el.textContent = msg;
         clearTimeout(this._t);
         this._t = setTimeout(() => (this.el.textContent = label), 1200);
-      }).catch(() => {
-        this.el.textContent = "Failed";
-        clearTimeout(this._t);
-        this._t = setTimeout(() => (this.el.textContent = label), 1200);
-      });
+      };
+      const fallbackCopy = (value) => {
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+          ok = document.execCommand("copy");
+        } catch (_) {
+          ok = false;
+        }
+        document.body.removeChild(ta);
+        return ok;
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => show("Copied"))
+          .catch(() => {
+            if (fallbackCopy(text)) show("Copied");
+            else show("Failed");
+          });
+      } else {
+        if (fallbackCopy(text)) show("Copied");
+        else show("Failed");
+      }
     };
     this.el.addEventListener("click", this.handle);
   },
@@ -48,7 +73,59 @@ const ThemeToggle = {
   },
 };
 
-const Hooks = { ClipboardCopy, ThemeToggle };
+// Client-side runtime clock — computes elapsed from data-started-at ISO8601.
+const RuntimeClock = {
+  mounted() {
+    this.tick();
+    this._interval = setInterval(() => this.tick(), 1000);
+  },
+  updated() {
+    this.tick();
+  },
+  destroyed() {
+    clearInterval(this._interval);
+  },
+  tick() {
+    const el = this.el;
+    const startedAt = el.dataset.startedAt;
+    const startedAtsRaw = el.dataset.startedAts;
+    const completed = parseInt(el.dataset.completedSeconds || "0", 10);
+    const turnCountAttr = el.dataset.turnCount;
+    const turnCount = turnCountAttr ? parseInt(turnCountAttr, 10) : null;
+
+    const format = (secs) => {
+      secs = Math.max(0, Math.floor(secs));
+      const m = Math.floor(secs / 60);
+      const s = secs % 60;
+      return `${m}m ${s}s`;
+    };
+
+    if (startedAt) {
+      const start = new Date(startedAt);
+      let diff = (Date.now() - start.getTime()) / 1000;
+      if (isNaN(diff) || diff < 0) diff = 0;
+      let text = format(diff);
+      if (turnCount && turnCount > 0) {
+        text += ` \u00B7 ${turnCount} ${turnCount === 1 ? "turn" : "turns"}`;
+      }
+      el.textContent = text;
+    } else if (startedAtsRaw) {
+      try {
+        const arr = JSON.parse(startedAtsRaw);
+        let total = isNaN(completed) ? 0 : completed;
+        const now = Date.now();
+        for (const s of arr) {
+          if (!s) continue;
+          let diff = (now - new Date(s).getTime()) / 1000;
+          if (!isNaN(diff) && diff > 0) total += diff;
+        }
+        el.textContent = format(total);
+      } catch (_e) {}
+    }
+  },
+};
+
+const Hooks = { ClipboardCopy, ThemeToggle, RuntimeClock };
 
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,

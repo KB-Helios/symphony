@@ -87,6 +87,7 @@ defmodule SymphonyElixirWeb.Layouts do
             type="button"
             id="theme-toggle"
             phx-hook="ThemeToggle"
+            aria-label="Toggle theme"
             class="flex w-full items-center justify-between rounded-xl border border-border/70 bg-card px-3 py-2.5 text-sm font-medium text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
           >
             <span class="inline-flex items-center gap-2">
@@ -204,6 +205,7 @@ defmodule SymphonyElixirWeb.Layouts do
     ~H"""
     <.link
       navigate={@href}
+      aria-current={if @active, do: "page", else: nil}
       class={[
         "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors",
         @active && "bg-accent text-accent-foreground",
@@ -229,6 +231,7 @@ defmodule SymphonyElixirWeb.Layouts do
     ~H"""
     <.link
       navigate={@href}
+      aria-current={if @active, do: "page", else: nil}
       class={[
         "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors",
         @active && "bg-primary text-primary-foreground shadow-sm ring-1 ring-primary/15",
