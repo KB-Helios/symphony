@@ -19,8 +19,11 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   require Logger
   alias SymphonyElixir.{Config, PathSafety, SSH, Tracker}
 
-  @port_line_bytes 1_048_576
+  @port_line_bytes 10_485_760
   @json_mode_flag "--mode json"
+
+  @spec port_line_bytes() :: pos_integer()
+  def port_line_bytes, do: @port_line_bytes
 
   @type session :: %{
           port: port(),
@@ -145,6 +148,9 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
     end
   end
 
+  # Deviation from SPEC §10.3: stderr is merged into the protocol stream via
+  # :stderr_to_stdout. Merged stderr filtered via protocol_message_candidate?/1
+  # (prime) / handle_prime_line non-JSON branch — see codex/app_server.ex note.
   defp start_port(workspace, nil, _prime_settings, dynamic_tool_binding) do
     executable = System.find_executable("bash")
 

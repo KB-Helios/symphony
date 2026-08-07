@@ -9,8 +9,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   @initialize_id 1
   @thread_start_id 2
   @turn_start_id 3
-  @port_line_bytes 1_048_576
+  @port_line_bytes 10_485_760
   @max_stream_log_bytes 1_000
+
+  @spec port_line_bytes() :: pos_integer()
+  def port_line_bytes, do: @port_line_bytes
   @type session :: %{
           port: port(),
           metadata: map(),
@@ -189,6 +192,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  # Deviation from SPEC §10.3: stderr is merged into the protocol stream via
+  # :stderr_to_stdout (standalone stderr pipe would require non-line mode or
+  # major rework). Merged stderr filtered via protocol_message_candidate?/1 —
+  # non-JSON lines are logged, JSON-like failures emit :malformed.
   defp start_port(workspace, nil, dynamic_tool_binding) do
     executable = System.find_executable("bash")
 
