@@ -268,14 +268,14 @@ defmodule SymphonyElixir.Workspace do
   def workspace_key(identifier) when is_binary(identifier) do
     safe_identifier = safe_identifier(identifier)
 
-    if safe_identifier == identifier do
-      safe_identifier
-    else
-      "#{safe_identifier}--#{short_identifier_hash(identifier)}"
+    cond do
+      safe_identifier in [".", ".."] -> "#{safe_identifier}--#{short_identifier_hash(identifier)}"
+      safe_identifier == identifier -> safe_identifier
+      true -> "#{safe_identifier}--#{short_identifier_hash(identifier)}"
     end
   end
 
-  def workspace_key(_identifier), do: "issue"
+  def workspace_key(_identifier), do: "issue--#{short_identifier_hash("fallback")}"
 
   defp safe_identifier(identifier) when is_binary(identifier),
     do: String.replace(identifier, ~r/[^a-zA-Z0-9._-]/, "_")
@@ -365,8 +365,7 @@ defmodule SymphonyElixir.Workspace do
           [
             remote_shell_assign("workspace", workspace),
             "if [ -d \"$workspace\" ]; then",
-            "  cd \"$workspace\"",
-            "  #{command}",
+            "  cd \"$workspace\" && #{command}",
             "fi"
           ]
           |> Enum.join("\n")
@@ -471,9 +470,22 @@ defmodule SymphonyElixir.Workspace do
       String.contains?(workspace, ["\n", "\r", <<0>>]) ->
         {:error, {:workspace_path_unreadable, workspace, :invalid_characters}}
 
+      remote_workspace_traversal?(workspace) ->
+        {:error, {:invalid_workspace_cwd, :outside_workspace_root, workspace}}
+
       true ->
         :ok
     end
+  end
+
+  defp remote_workspace_traversal?(path) when is_binary(path) do
+    basename = Path.basename(path)
+
+    basename in [".", ".."] or
+      String.contains?(path, "/../") or
+      String.starts_with?(path, "../") or
+      String.ends_with?(path, "/..") or
+      path in [".", ".."]
   end
 
   defp validate_recorded_workspace_path(workspace) when is_binary(workspace) do
