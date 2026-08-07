@@ -9,6 +9,13 @@ defmodule SymphonyElixirWeb.DashboardLive do
   @runtime_tick_ms 1_000
 
   @impl true
+  @doc """
+  Initializes the dashboard with its payload, current time, and root path.
+  
+  When the LiveView is connected, subscribes to observability updates and schedules runtime refreshes.
+  """
+  @spec mount(map(), map(), Phoenix.LiveView.Socket.t()) ::
+          {:ok, Phoenix.LiveView.Socket.t()}
   def mount(_params, _session, socket) do
     socket =
       socket
@@ -25,6 +32,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   @impl true
+  @doc """
+  Updates the workflow harness used for subsequent dispatches.
+  
+  ## Parameters
+  
+    - harness: Harness name to select; `"codex"` and `"prime"` are supported.
+  
+  Returns an updated socket with the refreshed payload on success or an error flash when the harness is invalid or cannot be updated.
+  """
+  @spec handle_event(String.t(), map(), Phoenix.LiveView.Socket.t()) ::
+          {:noreply, Phoenix.LiveView.Socket.t()}
   def handle_event("select_harness", %{"harness" => harness}, socket) do
     normalized = harness |> to_string() |> String.trim() |> String.downcase()
 
@@ -63,6 +81,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   @impl true
+  @doc """
+  Renders the operations dashboard with orchestration metrics, harness controls, rate limits, and session status.
+  """
+  @spec render(map()) :: Phoenix.LiveView.Rendered.t()
   def render(assigns) do
     ~H"""
     <div class="space-y-6">

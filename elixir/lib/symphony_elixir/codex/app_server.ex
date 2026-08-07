@@ -12,7 +12,10 @@ defmodule SymphonyElixir.Codex.AppServer do
   @port_line_bytes 10_485_760
   @max_stream_log_bytes 1_000
 
-  @spec port_line_bytes() :: pos_integer()
+  @doc """
+Returns the maximum number of bytes buffered for a single port line.
+"""
+@spec port_line_bytes() :: pos_integer()
   def port_line_bytes, do: @port_line_bytes
   @type session :: %{
           port: port(),

@@ -68,6 +68,11 @@ defmodule SymphonyElixir.Config do
     end
   end
 
+  @doc """
+  Returns the configured workflow prompt, using the default prompt when the configured value is blank.
+  
+  Raises `ArgumentError` if the workflow configuration cannot be loaded.
+  """
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case Workflow.current() do

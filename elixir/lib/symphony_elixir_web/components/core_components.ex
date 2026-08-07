@@ -19,6 +19,19 @@ defmodule SymphonyElixirWeb.CoreComponents do
   attr(:kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup")
   attr(:rest, :global)
 
+  @doc """
+  Displays a flash message for the specified kind when one is available.
+  
+  Clicking the message clears it and hides the component.
+  
+  ## Parameters
+  
+    - assigns: Component assigns containing the flash data and message kind.
+  
+  ## Returns
+  
+  A rendered flash message component.
+  """
   @spec flash(map()) :: Phoenix.LiveView.Rendered.t()
   def flash(assigns) do
     assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
@@ -48,6 +61,9 @@ defmodule SymphonyElixirWeb.CoreComponents do
   """
   attr(:flash, :map, required: true)
 
+  @doc """
+  Renders a centered notification container containing informational and error flash messages.
+  """
   @spec flash_group(map()) :: Phoenix.LiveView.Rendered.t()
   def flash_group(assigns) do
     ~H"""
@@ -67,6 +83,13 @@ defmodule SymphonyElixirWeb.CoreComponents do
   slot(:subtitle)
   slot(:actions)
 
+  @doc """
+  Renders a page header with a title and optional subtitle and actions.
+  
+  ## Parameters
+  
+    - assigns: Component assigns containing the title slot and optional `:subtitle`, `:actions`, and `:class` values.
+  """
   @spec header(map()) :: Phoenix.LiveView.Rendered.t()
   def header(assigns) do
     ~H"""
@@ -91,6 +114,17 @@ defmodule SymphonyElixirWeb.CoreComponents do
   """
   attr(:status, :string, required: true)
 
+  @doc """
+  Renders a rounded badge representing an operational status.
+  
+  ## Parameters
+  
+    - assigns: Component assigns containing the status to display.
+  
+  ## Returns
+  
+  A rendered status badge with a variant corresponding to the status value.
+  """
   @spec status_badge(map()) :: Phoenix.LiveView.Rendered.t()
   def status_badge(assigns) do
     variant =

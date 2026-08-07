@@ -265,6 +265,18 @@ defmodule SymphonyElixir.Workspace do
   @spec workspace_key(map() | String.t() | nil) :: String.t()
   def workspace_key(%{identifier: identifier}), do: workspace_key(identifier)
 
+  @doc """
+  Creates a collision-resistant workspace key from an issue identifier.
+  
+  ## Parameters
+  
+    - identifier: Identifier used to derive the workspace key.
+  
+  ## Returns
+  
+  A sanitized workspace key, with a short hash suffix when sanitization changes the identifier or produces a reserved path value.
+  """
+  @spec workspace_key(String.t()) :: String.t()
   def workspace_key(identifier) when is_binary(identifier) do
     safe_identifier = safe_identifier(identifier)
 
@@ -275,7 +287,13 @@ defmodule SymphonyElixir.Workspace do
     end
   end
 
-  def workspace_key(_identifier), do: "issue--#{short_identifier_hash("fallback")}"
+  @doc """
+Generates a collision-resistant workspace key for fallback identifiers.
+
+@returns A workspace key containing a hashed fallback identifier.
+"""
+@spec workspace_key(term()) :: String.t()
+def workspace_key(_identifier), do: "issue--#{short_identifier_hash("fallback")}"
 
   defp safe_identifier(identifier) when is_binary(identifier),
     do: String.replace(identifier, ~r/[^a-zA-Z0-9._-]/, "_")

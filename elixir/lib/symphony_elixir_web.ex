@@ -1,15 +1,16 @@
 defmodule SymphonyElixirWeb do
-  @moduledoc """
-  Web layer entrypoint for Symphony's observability UI.
+  
 
-  Provides the `html/0` helper used by LiveViews and function components so
-  SaladUI components, Phoenix.HTML, and verified routes are available in a
-  single place.
+  
+  @doc """
+Returns the static asset directories and files served by the web layer.
+"""
+@spec static_paths() :: [String.t()]
+def static_paths, do: ~w(assets fonts images favicon.png)
+
+  @doc """
+  Provides the shared setup for Phoenix routers.
   """
-
-  @spec static_paths() :: [String.t()]
-  def static_paths, do: ~w(assets fonts images favicon.png)
-
   @spec router() :: Macro.t()
   def router do
     quote do
@@ -21,6 +22,9 @@ defmodule SymphonyElixirWeb do
     end
   end
 
+  @doc """
+  Returns the quoted setup for Phoenix LiveView modules, including the application layout and shared HTML helpers.
+  """
   @spec live_view() :: Macro.t()
   def live_view do
     quote do
@@ -31,6 +35,9 @@ defmodule SymphonyElixirWeb do
     end
   end
 
+  @doc """
+  Configures a Phoenix LiveComponent with shared HTML helpers.
+  """
   @spec live_component() :: Macro.t()
   def live_component do
     quote do
@@ -40,6 +47,11 @@ defmodule SymphonyElixirWeb do
     end
   end
 
+  @doc """
+  Configures a Phoenix function component with shared HTML helpers.
+  
+  @returns Quoted setup code for a Phoenix function component.
+  """
   @spec component() :: Macro.t()
   def component do
     quote do
@@ -63,6 +75,9 @@ defmodule SymphonyElixirWeb do
     end
   end
 
+  @doc """
+  Configures Phoenix verified routes for the application endpoint, router, and static assets.
+  """
   @spec verified_routes() :: Macro.t()
   def verified_routes do
     quote do
@@ -80,16 +95,25 @@ defmodule SymphonyElixirWeb do
     apply(__MODULE__, which, [])
   end
 
+  
+  
   @doc """
-  Returns the configured orchestrator module, defaulting to SymphonyElixir.Orchestrator.
+  Provides the configured orchestrator module.
+  
+  Returns the configured module, or `SymphonyElixir.Orchestrator` when no module is configured.
   """
   @spec orchestrator() :: module()
   def orchestrator do
     SymphonyElixirWeb.Endpoint.config(:orchestrator) || SymphonyElixir.Orchestrator
   end
 
+  
+  
   @doc """
-  Returns the configured snapshot timeout in milliseconds, defaulting to 15_000.
+  Provides the configured snapshot timeout in milliseconds.
+  
+  Uses 15,000 milliseconds when no timeout is configured.
+  
   """
   @spec snapshot_timeout_ms() :: non_neg_integer()
   def snapshot_timeout_ms do

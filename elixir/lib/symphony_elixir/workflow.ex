@@ -49,6 +49,17 @@ defmodule SymphonyElixir.Workflow do
     load(workflow_file_path())
   end
 
+  @doc """
+  Loads and parses a workflow file from the specified path.
+  
+  ## Parameters
+  
+    - path: Path to the workflow file.
+  
+  ## Returns
+  
+    The parsed workflow, or `{:error, {:missing_workflow_file, path, reason}}` when the file cannot be read.
+  """
   @spec load(Path.t()) :: {:ok, loaded_workflow()} | {:error, term()}
   def load(path) when is_binary(path) do
     case File.read(path) do

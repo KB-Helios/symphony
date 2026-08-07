@@ -125,6 +125,12 @@ defmodule SymphonyElixir.Orchestrator do
     {:noreply, state}
   end
 
+  @doc """
+  Handles monitored agent termination messages.
+  
+  Removes the completed agent from the running state, records session totals, and applies the appropriate termination handling for the associated issue. Unknown monitor references are ignored.
+  """
+  @spec handle_info({:DOWN, reference(), :process, pid(), term()}, state()) :: {:noreply, state()}
   def handle_info(
         {:DOWN, ref, :process, _pid, reason},
         %{running: running} = state
@@ -412,7 +418,11 @@ defmodule SymphonyElixir.Orchestrator do
     select_worker_host(state, preferred_worker_host)
   end
 
-  @doc false
+  
+  
+  @doc """
+  Reconciles stalled running issues for testing.
+  """
   @spec reconcile_stalled_running_issues_for_test(term()) :: term()
   def reconcile_stalled_running_issues_for_test(%State{} = state) do
     reconcile_stalled_running_issues(state)
@@ -1451,6 +1461,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @impl true
+  @doc """
+  Builds the dashboard snapshot for running, retrying, and blocked issues, including polling status, token totals, rate limits, and live runtime durations.
+  """
+  @spec handle_call(:snapshot, GenServer.from(), map()) :: {:reply, map(), map()}
   def handle_call(:snapshot, _from, state) do
     state = refresh_runtime_config(state)
     now = DateTime.utc_now()

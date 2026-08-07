@@ -30,7 +30,11 @@ defmodule SymphonyElixir.Application do
     end
   end
 
-  @doc false
+  
+  
+  @doc """
+  Starts the normal runtime supervision tree.
+  """
   @spec start_runtime() :: Supervisor.on_start()
   def start_runtime do
     :ok = SymphonyElixir.LogFile.configure()
