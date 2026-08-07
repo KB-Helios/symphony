@@ -7,6 +7,7 @@ defmodule SymphonyElixirWeb.CoreComponents do
   """
 
   use Phoenix.Component
+  use SaladUI
 
   alias Phoenix.LiveView.JS
 
