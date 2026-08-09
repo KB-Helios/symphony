@@ -87,7 +87,7 @@ defmodule SymphonyElixirWeb.CoreComponents do
   end
 
   @doc """
-  Renders a status badge for session status (running, blocked, retrying).
+  Renders a status badge for orchestration claim status (running, blocked, retrying).
   """
   attr(:status, :string, required: true)
 
@@ -105,6 +105,145 @@ defmodule SymphonyElixirWeb.CoreComponents do
 
     ~H"""
     <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium capitalize"><%= @status %></.badge>
+    """
+  end
+
+  @doc """
+  Renders a badge for a provider-native issue state (e.g. "In Progress",
+  "Todo"). Distinct from `status_badge/1`, which renders orchestration claim
+  status — tracker state spelling is preserved and categorized by keywords.
+  """
+  attr(:state, :string, required: true)
+
+  @spec state_badge(map()) :: Phoenix.LiveView.Rendered.t()
+  def state_badge(assigns) do
+    normalized = String.downcase(to_string(assigns.state))
+
+    variant =
+      cond do
+        String.contains?(normalized, ["progress", "running", "active"]) -> "default"
+        String.contains?(normalized, ["blocked", "error", "failed"]) -> "destructive"
+        String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "secondary"
+        true -> "outline"
+      end
+
+    assigns = assign(assigns, :variant, variant)
+
+    ~H"""
+    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium"><%= @state %></.badge>
+    """
+  end
+
+  @doc """
+  Renders a badge for the agent harness executing a session.
+  """
+  attr(:harness, :string, default: nil)
+
+  @spec harness_badge(map()) :: Phoenix.LiveView.Rendered.t()
+  def harness_badge(assigns) do
+    label = assigns.harness || "codex"
+    variant = if label == "prime", do: "secondary", else: "outline"
+    assigns = assigns |> assign(:label, label) |> assign(:variant, variant)
+
+    ~H"""
+    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide"><%= @label %></.badge>
+    """
+  end
+
+  @doc """
+  Renders a consistent empty state for tables, feeds, and lists.
+  """
+  attr(:icon, :string, default: "hero-inbox")
+  attr(:title, :string, default: nil)
+  attr(:message, :string, required: true)
+
+  @spec empty_state(map()) :: Phoenix.LiveView.Rendered.t()
+  def empty_state(assigns) do
+    ~H"""
+    <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-10 text-center">
+      <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+        <.icon name={@icon} class="h-5 w-5" />
+      </span>
+      <p :if={@title} class="mt-3 text-sm font-medium"><%= @title %></p>
+      <p class="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground"><%= @message %></p>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a table header cell with the shared column-header styling.
+  """
+  attr(:class, :any, default: nil)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  @spec th(map()) :: Phoenix.LiveView.Rendered.t()
+  def th(assigns) do
+    ~H"""
+    <th
+      scope="col"
+      class={[
+        "h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide",
+        @class
+      ]}
+      {@rest}
+    >
+      {render_slot(@inner_block)}
+    </th>
+    """
+  end
+
+  @pill_class "inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+
+  @doc """
+  Renders a pill-shaped navigation link in the shared outline style.
+  """
+  attr(:navigate, :string, default: nil)
+  attr(:href, :string, default: nil)
+  attr(:icon_left, :string, default: nil)
+  attr(:icon_right, :string, default: nil)
+  attr(:class, :any, default: nil)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  @spec pill_link(map()) :: Phoenix.LiveView.Rendered.t()
+  def pill_link(assigns) do
+    assigns = assign(assigns, :link_class, [@pill_class, assigns.class])
+
+    ~H"""
+    <.link navigate={@navigate} href={@href} class={@link_class} {@rest}>
+      <.icon :if={@icon_left} name={@icon_left} class="h-3.5 w-3.5" />
+      {render_slot(@inner_block)}
+      <.icon :if={@icon_right} name={@icon_right} class="h-3.5 w-3.5" />
+    </.link>
+    """
+  end
+
+  @doc """
+  Renders a pill-shaped action button in the shared outline style.
+  """
+  attr(:disabled, :boolean, default: false)
+  attr(:icon_left, :string, default: nil)
+  attr(:icon_right, :string, default: nil)
+  attr(:class, :any, default: nil)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  @spec pill_button(map()) :: Phoenix.LiveView.Rendered.t()
+  def pill_button(assigns) do
+    assigns =
+      assign(assigns, :button_class, [
+        @pill_class,
+        "disabled:pointer-events-none disabled:opacity-50",
+        assigns.class
+      ])
+
+    ~H"""
+    <button class={@button_class} disabled={@disabled} {@rest}>
+      <.icon :if={@icon_left} name={@icon_left} class="h-3 w-3" />
+      {render_slot(@inner_block)}
+      <.icon :if={@icon_right} name={@icon_right} class="h-3 w-3" />
+    </button>
     """
   end
 

@@ -262,6 +262,8 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert state_payload == %{
              "generated_at" => state_payload["generated_at"],
+             "harness" => "codex",
+             "supported_harnesses" => SymphonyElixir.Harness.supported_harnesses(),
              "counts" => %{"running" => 1, "retrying" => 1, "blocked" => 1},
              "running" => [
                %{
@@ -269,6 +271,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "issue_identifier" => "MT-HTTP",
                  "issue_url" => "https://example.org/issues/MT-HTTP",
                  "state" => "In Progress",
+                 "harness" => "codex",
                  "worker_host" => nil,
                  "workspace_path" => nil,
                  "session_id" => "thread-http",
@@ -298,6 +301,7 @@ defmodule SymphonyElixir.ExtensionsTest do
                  "issue_identifier" => "MT-BLOCKED",
                  "issue_url" => "https://example.org/issues/MT-BLOCKED",
                  "state" => "In Progress",
+                 "harness" => "codex",
                  "error" => "codex turn requires operator input",
                  "worker_host" => "dm-dev2",
                  "workspace_path" => "/workspaces/MT-BLOCKED",
@@ -314,7 +318,12 @@ defmodule SymphonyElixir.ExtensionsTest do
                "total_tokens" => 12,
                "seconds_running" => 42.5
              },
-             "rate_limits" => %{"primary" => %{"remaining" => 11}}
+             "rate_limits" => %{"primary" => %{"remaining" => 11}},
+             "polling" => %{
+               "checking" => false,
+               "next_poll_in_ms" => 30_000,
+               "poll_interval_ms" => 30_000
+             }
            }
 
     conn = get(build_conn(), "/api/v1/MT-HTTP")
@@ -330,6 +339,8 @@ defmodule SymphonyElixir.ExtensionsTest do
              },
              "attempts" => %{"restart_count" => 0, "current_retry_attempt" => 0},
              "running" => %{
+               "harness" => "codex",
+               "issue_url" => "https://example.org/issues/MT-HTTP",
                "worker_host" => nil,
                "workspace_path" => nil,
                "session_id" => "thread-http",
@@ -397,7 +408,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert json_response(get(build_conn(), "/unknown"), 404) ==
              %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
 
-    state_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
+    state_payload = json_response(get(build_conn(), "/api/v1/state"), 503)
 
     assert state_payload ==
              %{
@@ -419,7 +430,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, _pid} = SlowOrchestrator.start_link(name: timeout_orchestrator)
     start_test_endpoint(orchestrator: timeout_orchestrator, snapshot_timeout_ms: 1)
 
-    timeout_payload = json_response(get(build_conn(), "/api/v1/state"), 200)
+    timeout_payload = json_response(get(build_conn(), "/api/v1/state"), 503)
 
     assert timeout_payload ==
              %{
@@ -428,7 +439,7 @@ defmodule SymphonyElixir.ExtensionsTest do
              }
   end
 
-  test "dashboard bootstraps liveview from embedded static assets" do
+  test "dashboard bootstraps liveview from the compiled asset pipeline" do
     orchestrator_name = Module.concat(__MODULE__, :AssetOrchestrator)
 
     {:ok, _pid} =
@@ -446,38 +457,21 @@ defmodule SymphonyElixir.ExtensionsTest do
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
     html = html_response(get(build_conn(), "/"), 200)
-    assert html =~ ~r|/dashboard\.css\?v=[0-9a-f]{12}|
-
-    assert html =~
-             ~r|<link rel="icon" type="image/png" sizes="128x128" href="/favicon\.png\?v=[0-9a-f]{12}">|
-
-    assert html =~ "/vendor/phoenix_html/phoenix_html.js"
-    assert html =~ "/vendor/phoenix/phoenix.js"
-    assert html =~ "/vendor/phoenix_live_view/phoenix_live_view.js"
-    refute html =~ "/assets/app.js"
-    refute html =~ "<style>"
-
-    dashboard_css = response(get(build_conn(), "/dashboard.css"), 200)
-    assert dashboard_css =~ ":root {"
-    assert dashboard_css =~ ".status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-live"
-    assert dashboard_css =~ "[data-phx-main].phx-connected .status-badge-offline"
-    assert dashboard_css =~ "text-decoration-thickness: 1px"
+    assert html =~ "/assets/app.css"
+    assert html =~ "/assets/app.js"
+    assert html =~ ~s|<link rel="icon" type="image/png" sizes="128x128"|
+    refute html =~ "/dashboard.css"
+    refute html =~ "/vendor/phoenix"
 
     favicon_conn = get(build_conn(), "/favicon.png")
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
-    assert Plug.Conn.get_resp_header(favicon_conn, "content-type") == ["image/png; charset=utf-8"]
+    assert Plug.Conn.get_resp_header(favicon_conn, "content-type") == ["image/png"]
 
-    phoenix_html_js = response(get(build_conn(), "/vendor/phoenix_html/phoenix_html.js"), 200)
-    assert phoenix_html_js =~ "phoenix.link.click"
+    assert json_response(get(build_conn(), "/dashboard.css"), 404) ==
+             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
 
-    phoenix_js = response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 200)
-    assert phoenix_js =~ "var Phoenix = (() => {"
-
-    live_view_js =
-      response(get(build_conn(), "/vendor/phoenix_live_view/phoenix_live_view.js"), 200)
-
-    assert live_view_js =~ "var LiveView = (() => {"
+    assert json_response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 404) ==
+             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
   end
 
   test "dashboard liveview renders and refreshes over pubsub" do
@@ -499,7 +493,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
     {:ok, view, html} = live(build_conn(), "/")
-    assert html =~ "Operations Dashboard"
+    assert html =~ "Operations"
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
     assert html =~ "MT-BLOCKED"
@@ -513,13 +507,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ "Live"
     assert html =~ "Offline"
     assert html =~ "Copy ID"
-    assert html =~ "Codex update"
-    refute html =~ "data-runtime-clock="
-    refute html =~ "setInterval(refreshRuntimeClocks"
-    refute html =~ "Refresh now"
-    refute html =~ "Transport"
-    assert html =~ "status-badge-live"
-    assert html =~ "status-badge-offline"
+    assert html =~ "next check in 30s"
 
     updated_snapshot =
       put_in(snapshot.running, [
@@ -612,13 +600,17 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert response.status == 200
     assert response.body["counts"] == %{"running" => 1, "retrying" => 1, "blocked" => 1}
 
+    favicon = Req.get!("http://127.0.0.1:#{port}/favicon.png")
+    assert favicon.status == 200
+    assert favicon.body == File.read!("priv/static/favicon.png")
+
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
-    assert dashboard_css.status == 200
-    assert dashboard_css.body =~ ":root {"
+    assert dashboard_css.status == 404
+    assert dashboard_css.body["error"]["code"] == "not_found"
 
     phoenix_js = Req.get!("http://127.0.0.1:#{port}/vendor/phoenix/phoenix.js")
-    assert phoenix_js.status == 200
-    assert phoenix_js.body =~ "var Phoenix = (() => {"
+    assert phoenix_js.status == 404
+    assert phoenix_js.body["error"]["code"] == "not_found"
 
     refresh_response =
       Req.post!("http://127.0.0.1:#{port}/api/v1/refresh",
@@ -703,7 +695,8 @@ defmodule SymphonyElixir.ExtensionsTest do
         }
       ],
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
-      rate_limits: %{"primary" => %{"remaining" => 11}}
+      rate_limits: %{"primary" => %{"remaining" => 11}},
+      polling: %{checking?: false, next_poll_in_ms: 30_000, poll_interval_ms: 30_000}
     }
   end
 

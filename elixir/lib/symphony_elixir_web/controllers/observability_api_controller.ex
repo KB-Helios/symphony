@@ -15,7 +15,12 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
-    json(conn, Presenter.state_payload(orchestrator(), snapshot_timeout_ms()))
+    payload = Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
+
+    case payload do
+      %{error: _snapshot_error} -> conn |> put_status(503) |> json(payload)
+      _ -> json(conn, payload)
+    end
   end
 
   @spec update_harness(Conn.t(), map()) :: Conn.t()

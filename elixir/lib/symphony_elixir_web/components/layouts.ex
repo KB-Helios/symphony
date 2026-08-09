@@ -9,8 +9,8 @@ defmodule SymphonyElixirWeb.Layouts do
   def root(assigns) do
     assigns =
       assigns
-      |> assign(:csrf_token, Plug.CSRFProtection.get_csrf_token())
-      |> assign(:favicon_url, SymphonyElixirWeb.StaticAssets.favicon_url())
+      |> assign_new(:csrf_token, fn -> Plug.CSRFProtection.get_csrf_token() end)
+      |> assign_new(:page_title, fn -> "Symphony — Observability" end)
 
     ~H"""
     <!DOCTYPE html>
@@ -20,14 +20,14 @@ defmodule SymphonyElixirWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={@csrf_token} />
         <meta name="color-scheme" content="light dark" />
-        <title>Symphony — Observability</title>
+        <title>{@page_title}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
           href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
           rel="stylesheet"
         />
-        <link rel="icon" type="image/png" sizes="128x128" href={@favicon_url} />
+        <link rel="icon" type="image/png" sizes="128x128" phx-track-static href={~p"/favicon.png"} />
         <link rel="stylesheet" href={~p"/assets/app.css"} />
         <script>
           // Apply persisted theme before first paint to avoid a flash.
@@ -80,7 +80,7 @@ defmodule SymphonyElixirWeb.Layouts do
           <div class="rounded-xl border border-border/70 bg-muted/40 px-3 py-3">
             <p class="text-xs font-semibold">Orchestrator</p>
             <p class="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Live snapshot via OTP + Linear polling.
+              Live snapshot from the polling orchestrator.
             </p>
           </div>
           <button
@@ -110,17 +110,10 @@ defmodule SymphonyElixirWeb.Layouts do
               S
             </span>
             <span class="text-sm font-semibold tracking-tight">Symphony</span>
-            <div class="relative ml-2 inline-flex md:hidden">
-              <select
-                aria-label="Navigate"
-                onchange="window.location.href = this.value"
-                class="h-8 appearance-none rounded-lg border border-border bg-card px-3 pr-7 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="/" selected={@current == "/"}>Overview</option>
-                <option value="/sessions" selected={String.starts_with?(@current, "/sessions")}>Sessions</option>
-              </select>
-              <span class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">▼</span>
-            </div>
+            <nav class="ml-1 flex items-center gap-1 md:hidden" aria-label="Primary">
+              <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
+              <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
+            </nav>
           </div>
           <nav class="hidden items-center gap-1 md:flex">
             <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
@@ -150,31 +143,6 @@ defmodule SymphonyElixirWeb.Layouts do
           </div>
         </div>
 
-        <div class="symphony-mesh border-b border-border/60 bg-gradient-to-b from-card to-background">
-          <div class="mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-            <div class="flex flex-wrap items-start justify-between gap-4">
-              <div class="min-w-0">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Symphony Elixir</p>
-                <h1 class="mt-1 text-[22px] font-semibold tracking-tight sm:text-[26px]">Observability</h1>
-                <p class="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                  Track agent sessions, retry pressure, and harness health — one coherent cockpit for the active runtime.
-                </p>
-              </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <.link
-                  navigate="/sessions"
-                  class="inline-flex h-9 items-center justify-center rounded-full bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-                >
-                  View sessions
-                </.link>
-                <span class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
-                  <span class="h-2 w-2 rounded-full bg-violet-500"></span> Violet theme
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
           {@inner_content}
         </main>
@@ -182,7 +150,7 @@ defmodule SymphonyElixirWeb.Layouts do
         <footer class="border-t border-border/60 px-4 py-6 text-xs text-muted-foreground sm:px-6 lg:px-8">
           <div class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
             <span>Symphony Elixir · Observability dashboard</span>
-            <span class="mono text-[11px]">SaladUI · Tailwind v4 · LiveView</span>
+            <span class="mono text-[11px]">v{symphony_version()}</span>
           </div>
         </footer>
       </div>
@@ -215,6 +183,14 @@ defmodule SymphonyElixirWeb.Layouts do
       {render_slot(@inner_block)}
     </.link>
     """
+  end
+
+  defp symphony_version do
+    case Application.spec(:symphony_elixir, :vsn) do
+      vsn when is_list(vsn) -> List.to_string(vsn)
+      vsn when is_binary(vsn) -> vsn
+      _ -> "0.0.0"
+    end
   end
 
   attr(:href, :string, required: true)

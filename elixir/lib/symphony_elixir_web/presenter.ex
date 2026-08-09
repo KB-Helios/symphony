@@ -30,7 +30,8 @@ defmodule SymphonyElixirWeb.Presenter do
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           blocked: Enum.map(Map.get(snapshot, :blocked, []), &blocked_entry_payload/1),
           codex_totals: snapshot.codex_totals,
-          rate_limits: snapshot.rate_limits
+          rate_limits: snapshot.rate_limits,
+          polling: polling_payload(Map.get(snapshot, :polling))
         }
 
       :timeout ->
@@ -106,6 +107,16 @@ defmodule SymphonyElixirWeb.Presenter do
   defp issue_status(running, _retry, _blocked) when not is_nil(running), do: "running"
   defp issue_status(nil, retry, _blocked) when not is_nil(retry), do: "retrying"
   defp issue_status(nil, nil, _blocked), do: "blocked"
+
+  defp polling_payload(nil), do: nil
+
+  defp polling_payload(polling) when is_map(polling) do
+    %{
+      checking: Map.get(polling, :checking?, false) == true,
+      next_poll_in_ms: Map.get(polling, :next_poll_in_ms),
+      poll_interval_ms: Map.get(polling, :poll_interval_ms)
+    }
+  end
 
   defp running_entry_payload(entry) do
     %{

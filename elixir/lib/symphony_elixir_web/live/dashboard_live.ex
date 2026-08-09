@@ -7,8 +7,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   alias SymphonyElixirWeb.{ObservabilityPubSub, Presenter}
 
-  @table_header_cell_class "h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide"
-
   @impl true
   def mount(_params, _session, socket) do
     payload = load_payload()
@@ -25,6 +23,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
       |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
       |> assign(:filtered_retrying, filtered_retrying(payload, q))
       |> assign(:current_path, "/")
+      |> assign(:page_title, "Symphony — Operations")
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -37,26 +36,24 @@ defmodule SymphonyElixirWeb.DashboardLive do
   def handle_event("select_harness", %{"harness" => harness}, socket) do
     normalized = harness |> to_string() |> String.trim() |> String.downcase()
 
-    case normalized do
-      kind when kind in SymphonyElixir.Harness.supported_harnesses() ->
-        case update_workflow_harness(kind) do
-          :ok ->
-            payload = load_payload()
+    if normalized in SymphonyElixir.Harness.supported_harnesses() do
+      case update_workflow_harness(normalized) do
+        :ok ->
+          payload = load_payload()
 
-            {:noreply,
-             socket
-             |> assign(:payload, payload)
-             |> assign(:filtered_running, filtered_running(payload, socket.assigns.q, socket.assigns.harness_filter))
-             |> assign(:filtered_blocked, filtered_blocked(payload, socket.assigns.q, socket.assigns.harness_filter))
-             |> assign(:filtered_retrying, filtered_retrying(payload, socket.assigns.q))
-             |> put_flash(:info, "Harness set to #{kind} for next dispatches.")}
+          {:noreply,
+           socket
+           |> assign(:payload, payload)
+           |> assign(:filtered_running, filtered_running(payload, socket.assigns.q, socket.assigns.harness_filter))
+           |> assign(:filtered_blocked, filtered_blocked(payload, socket.assigns.q, socket.assigns.harness_filter))
+           |> assign(:filtered_retrying, filtered_retrying(payload, socket.assigns.q))
+           |> put_flash(:info, "Harness set to #{normalized} for next dispatches.")}
 
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, "Failed to update harness: #{inspect(reason)}")}
-        end
-
-      _ ->
-        {:noreply, put_flash(socket, :error, "Unknown harness: #{inspect(harness)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to update harness: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Unknown harness: #{inspect(harness)}")}
     end
   end
 
@@ -141,7 +138,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
           Live orchestration state — running sessions, retry pressure, token spend, and rate-limit health.
         </:subtitle>
         <:actions>
-          <.connection_badge />
+          <.poll_indicator polling={@payload && @payload[:polling]} />
         </:actions>
       </.header>
 
@@ -296,17 +293,18 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   # ---- components ----
 
-  defp connection_badge(assigns) do
+  attr(:polling, :any, default: nil)
+
+  defp poll_indicator(assigns) do
+    assigns = assign(assigns, :label, poll_label(assigns.polling))
+
     ~H"""
-    <span class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
-      <span class="relative flex h-2 w-2">
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 [data-phx-main:not(.phx-connected)_&]:hidden">
-        </span>
-        <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 [data-phx-main:not(.phx-connected)_&]:bg-zinc-400">
-        </span>
-      </span>
-      <span class="[data-phx-main:not(.phx-connected)_&]:hidden">Live</span>
-      <span class="hidden [data-phx-main:not(.phx-connected)_&]:inline">Offline</span>
+    <span
+      :if={@label}
+      class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm"
+    >
+      <span class="h-2 w-2 rounded-full bg-violet-500"></span>
+      <span class="mono"><%= @label %></span>
     </span>
     """
   end
@@ -347,7 +345,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
           </select>
         </form>
 
-        <.button phx-click="refresh" aria-label="Refresh dashboard" variant="outline" size="sm" class="h-9 rounded-xl px-4 text-sm">
+        <.button
+          phx-click="refresh"
+          phx-disable-with="Refreshing…"
+          aria-label="Refresh dashboard"
+          variant="outline"
+          size="sm"
+          class="h-9 rounded-xl px-4 text-sm"
+        >
           <.icon name="hero-arrow-path" class="mr-1.5 h-4 w-4" /> Refresh
         </.button>
       </.card_content>
@@ -437,7 +442,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:kind, :atom, required: true)
 
   defp sessions_card(assigns) do
-    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -466,16 +470,16 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <.table_caption class="sr-only"><%= @title %> table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <th scope="col" class={@table_header_cell_class}>Issue</th>
-                  <th scope="col" class={@table_header_cell_class}>State</th>
-                  <th scope="col" class={@table_header_cell_class}>Harness</th>
-                  <th scope="col" class={@table_header_cell_class}>Session</th>
-                  <th scope="col" class={@table_header_cell_class}><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></th>
-                  <th scope="col" class={@table_header_cell_class}>Last update</th>
+                  <.th>Issue</.th>
+                  <.th>State</.th>
+                  <.th>Harness</.th>
+                  <.th>Session</.th>
+                  <.th><%= if @kind == :running, do: "Runtime / turns", else: "Blocked at" %></.th>
+                  <.th>Last update</.th>
                   <%= if @kind == :running do %>
-                    <th scope="col" class={@table_header_cell_class}>Tokens</th>
+                    <.th>Tokens</.th>
                   <% else %>
-                    <th scope="col" class={@table_header_cell_class}>Error</th>
+                    <.th>Error</.th>
                   <% end %>
                 </.table_row>
               </.table_header>
@@ -573,7 +577,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
   attr(:empty_q, :string, default: "")
 
   defp retry_card(assigns) do
-    assigns = assign(assigns, :table_header_cell_class, @table_header_cell_class)
     ~H"""
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
@@ -600,10 +603,10 @@ defmodule SymphonyElixirWeb.DashboardLive do
               <.table_caption class="sr-only">Retry queue table</.table_caption>
               <.table_header>
                 <.table_row class="hover:bg-transparent">
-                  <th scope="col" class={@table_header_cell_class}>Issue</th>
-                  <th scope="col" class={@table_header_cell_class}>Attempt</th>
-                  <th scope="col" class={@table_header_cell_class}>Due at</th>
-                  <th scope="col" class={@table_header_cell_class}>Error</th>
+                  <.th>Issue</.th>
+                  <.th>Attempt</.th>
+                  <.th>Due at</.th>
+                  <.th>Error</.th>
                 </.table_row>
               </.table_header>
               <.table_body>
@@ -634,51 +637,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
     """
   end
 
-  attr(:message, :string, required: true)
-
-  defp empty_state(assigns) do
-    ~H"""
-    <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-10 text-center">
-      <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-        <.icon name="hero-inbox" class="h-5 w-5" />
-      </span>
-      <p class="mt-3 max-w-sm text-sm leading-relaxed text-muted-foreground"><%= @message %></p>
-    </div>
-    """
-  end
-
-  attr(:state, :string, required: true)
-
-  defp state_badge(assigns) do
-    normalized = String.downcase(to_string(assigns.state))
-
-    variant =
-      cond do
-        String.contains?(normalized, ["progress", "running", "active"]) -> "default"
-        String.contains?(normalized, ["blocked", "error", "failed"]) -> "destructive"
-        String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "secondary"
-        true -> "outline"
-      end
-
-    assigns = assign(assigns, :variant, variant)
-
-    ~H"""
-    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium"><%= @state %></.badge>
-    """
-  end
-
-  attr(:harness, :string, default: nil)
-
-  defp harness_badge(assigns) do
-    label = assigns.harness || "codex"
-    variant = if assigns.harness == "prime", do: "secondary", else: "outline"
-    assigns = assigns |> assign(:label, label) |> assign(:variant, variant)
-
-    ~H"""
-    <.badge variant={@variant} class="rounded-full px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wide"><%= @label %></.badge>
-    """
-  end
-
   attr(:identifier, :string, required: true)
   attr(:url, :string, default: nil)
 
@@ -703,6 +661,14 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   # ---- data / formatting helpers ----
+
+  defp poll_label(%{checking: true}), do: "checking now…"
+
+  defp poll_label(%{next_poll_in_ms: ms}) when is_integer(ms) do
+    "next check in #{max(div(ms + 999, 1_000), 0)}s"
+  end
+
+  defp poll_label(_polling), do: nil
 
   defp load_payload do
     Presenter.state_payload(orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
@@ -805,17 +771,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp matches_harness?(_harness, "all"), do: true
 
-  defp matches_harness?(nil, _filter) do
-    String.downcase("codex") == _filter
-  end
-
   defp matches_harness?(harness, filter) when is_binary(harness) and is_binary(filter) do
     String.downcase(harness) == filter
   end
 
-  defp matches_harness?(_harness, _filter) do
-    String.downcase("codex") == _filter
-  end
+  # Sessions without a recorded harness count as the default ("codex").
+  defp matches_harness?(_harness, filter), do: filter == "codex"
 
   # ---- rate limit helpers ----
 
