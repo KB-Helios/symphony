@@ -198,11 +198,11 @@ defmodule SymphonyElixir.CoreTest do
              Workflow.load(workflow_path)
   end
 
-  test "workflow load accepts unterminated front matter with an empty prompt" do
+  test "workflow load rejects unterminated front matter as a parse error" do
     workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
 
-    assert {:ok, %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
+    assert {:error, {:workflow_parse_error, :unterminated_front_matter}} =
              Workflow.load(workflow_path)
   end
 

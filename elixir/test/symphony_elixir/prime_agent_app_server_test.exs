@@ -97,7 +97,7 @@ defmodule SymphonyElixir.PrimeAgentAppServerTest do
       result = PrimeAppServer.run(workspace, prompt, issue)
 
       assert {:ok, %{result: :turn_completed, session_id: session_id, thread_id: thread_id, turn_id: "1"}} =
-                result
+               result
 
       assert is_binary(session_id)
       assert is_binary(thread_id)

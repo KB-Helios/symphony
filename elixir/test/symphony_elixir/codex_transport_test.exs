@@ -1,12 +1,8 @@
 defmodule SymphonyElixir.CodexTransportTest do
   use SymphonyElixir.TestSupport
 
-  test "codex port line is 10 MB" do
-    assert SymphonyElixir.Codex.AppServer.port_line_bytes() == 10_485_760
-  end
-
-  test "prime port line is 10 MB" do
-    assert SymphonyElixir.PrimeAgent.AppServer.port_line_bytes() == 10_485_760
+  test "transport port line is 10 MB" do
+    assert SymphonyElixir.Harness.port_line_bytes() == 10_485_760
   end
 
   test "stderr handling is documented (merged stream filtered via protocol_message_candidate?)" do

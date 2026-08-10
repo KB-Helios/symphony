@@ -21,6 +21,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
       |> assign(:page, 1)
       |> assign(:q, "")
       |> assign(:per_page, @per_page)
+      |> assign(:page_title, "Symphony — Sessions")
 
     if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
 
@@ -109,8 +110,8 @@ defmodule SymphonyElixirWeb.SessionsLive do
         <% else %>
           <div class="grid gap-3 sm:grid-cols-3">
           <.mini_stat label="Running" value={length(@payload.running)} tone="violet" icon="hero-bolt" />
-          <.mini_stat label="Blocked" value={length(@payload.blocked)} tone="amber" icon="hero-pause-circle" />
-          <.mini_stat label="Retrying" value={length(@payload.retrying)} tone="zinc" icon="hero-clock" />
+          <.mini_stat label="Blocked" value={length(@payload.blocked)} tone="rose" icon="hero-pause-circle" />
+          <.mini_stat label="Retrying" value={length(@payload.retrying)} tone="amber" icon="hero-clock" />
         </div>
 
         <.card class="card-elevated overflow-hidden">
@@ -122,12 +123,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   <%= total(@payload) %> tracked issue(s) · grouped by status
                 </.card_description>
               </div>
-              <.link
-                navigate="/"
-                class="inline-flex h-8 items-center rounded-full border border-border bg-card px-3 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
-              >
-                Back to overview
-              </.link>
+              <.pill_link navigate="/" icon_left="hero-arrow-left">Back to overview</.pill_link>
             </div>
           </.card_header>
 
@@ -180,15 +176,10 @@ defmodule SymphonyElixirWeb.SessionsLive do
           <.card_content class="p-0" role="tabpanel" id="sessions-table-panel">
             <%= if total(@payload) == 0 do %>
               <div class="p-6">
-                <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-12 text-center">
-                  <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                    <.icon name="hero-inbox" class="h-5 w-5" />
-                  </span>
-                  <p class="mt-3 text-sm font-medium">No sessions yet</p>
-                  <p class="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                    When the runtime starts tracking issues, they'll appear here with live state and harness info.
-                  </p>
-                </div>
+                <.empty_state
+                  title="No sessions yet"
+                  message="When the runtime starts tracking issues, they'll appear here with live state and harness info."
+                />
               </div>
             <% else %>
               <% filtered = filtered_rows(@payload, @tab, @q) %>
@@ -199,15 +190,11 @@ defmodule SymphonyElixirWeb.SessionsLive do
               <% paginated = paginated_rows(sorted, current_page, @per_page) %>
               <%= if total_filtered == 0 do %>
                 <div class="p-6">
-                  <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-12 text-center">
-                    <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                      <.icon name="hero-magnifying-glass" class="h-5 w-5" />
-                    </span>
-                    <p class="mt-3 text-sm font-medium">No matches</p>
-                    <p class="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                      No sessions match the current tab or search filter.
-                    </p>
-                  </div>
+                  <.empty_state
+                    icon="hero-magnifying-glass"
+                    title="No matches"
+                    message="No sessions match the current tab or search filter."
+                  />
                 </div>
               <% else %>
                 <div class="overflow-x-auto">
@@ -215,7 +202,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                       <.table_caption class="sr-only">Sessions table</.table_caption>
                     <.table_header>
                       <.table_row class="hover:bg-transparent">
-                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :identifier)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        <.th aria-sort={aria_sort(@sort_by, @sort_dir, :identifier)}>
                           <button
                             phx-click="sort"
                             phx-value-sort="identifier"
@@ -223,8 +210,8 @@ defmodule SymphonyElixirWeb.SessionsLive do
                           >
                             Issue <.icon name={sort_icon(@sort_by, @sort_dir, :identifier)} class="h-3 w-3" />
                           </button>
-                        </th>
-                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :status)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        </.th>
+                        <.th aria-sort={aria_sort(@sort_by, @sort_dir, :status)}>
                           <button
                             phx-click="sort"
                             phx-value-sort="status"
@@ -232,8 +219,8 @@ defmodule SymphonyElixirWeb.SessionsLive do
                           >
                             Status <.icon name={sort_icon(@sort_by, @sort_dir, :status)} class="h-3 w-3" />
                           </button>
-                        </th>
-                        <th scope="col" aria-sort={aria_sort(@sort_by, @sort_dir, :state)} class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">
+                        </.th>
+                        <.th aria-sort={aria_sort(@sort_by, @sort_dir, :state)}>
                           <button
                             phx-click="sort"
                             phx-value-sort="state"
@@ -241,10 +228,10 @@ defmodule SymphonyElixirWeb.SessionsLive do
                           >
                             State <.icon name={sort_icon(@sort_by, @sort_dir, :state)} class="h-3 w-3" />
                           </button>
-                        </th>
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Harness</th>
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Host</th>
-                        <th scope="col" class="h-12 px-4 text-left align-middle font-medium text-muted-foreground text-[11px] uppercase tracking-wide">Detail</th>
+                        </.th>
+                        <.th>Harness</.th>
+                        <.th>Host</.th>
+                        <.th>Detail</.th>
                       </.table_row>
                     </.table_header>
                     <.table_body>
@@ -267,9 +254,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                         <.table_cell class="text-sm"><%= row.state || "—" %></.table_cell>
                         <.table_cell>
                           <%= if row.harness do %>
-                            <span class="inline-flex rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium uppercase tracking-wide">
-                              <%= row.harness %>
-                            </span>
+                            <.harness_badge harness={row.harness} />
                           <% else %>
                             <span class="text-xs text-muted-foreground">—</span>
                           <% end %>
@@ -292,25 +277,25 @@ defmodule SymphonyElixirWeb.SessionsLive do
                     Showing <%= showing_range(current_page, @per_page, total_filtered) %> of <%= total_filtered %>
                   </span>
                   <div class="flex items-center gap-2">
-                    <button
+                    <.pill_button
                       aria-label="Previous page"
                       phx-click="paginate"
                       phx-value-page={current_page - 1}
                       disabled={current_page <= 1}
-                      class="inline-flex h-8 items-center rounded-full border border-border bg-card px-3 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:pointer-events-none"
+                      icon_left="hero-chevron-left"
                     >
-                      <.icon name="hero-chevron-left" class="mr-1 h-3 w-3" /> Prev
-                    </button>
+                      Prev
+                    </.pill_button>
                     <span class="mono text-xs text-muted-foreground">Page <%= current_page %> / <%= total_pages %></span>
-                    <button
+                    <.pill_button
                       aria-label="Next page"
                       phx-click="paginate"
                       phx-value-page={current_page + 1}
                       disabled={current_page >= total_pages}
-                      class="inline-flex h-8 items-center rounded-full border border-border bg-card px-3 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:pointer-events-none"
+                      icon_right="hero-chevron-right"
                     >
-                      Next <.icon name="hero-chevron-right" class="ml-1 h-3 w-3" />
-                    </button>
+                      Next
+                    </.pill_button>
                   </div>
                 </div>
               <% end %>
@@ -340,6 +325,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
           "flex h-9 w-9 items-center justify-center rounded-xl ring-1",
           @tone == "violet" && "bg-violet-500/10 text-violet-600 ring-violet-500/15 dark:text-violet-400",
           @tone == "amber" && "bg-amber-500/10 text-amber-600 ring-amber-500/15 dark:text-amber-400",
+          @tone == "rose" && "bg-rose-500/10 text-rose-600 ring-rose-500/15 dark:text-rose-400",
           @tone == "zinc" && "bg-muted text-muted-foreground ring-border"
         ]}>
           <.icon name={@icon} class="h-4 w-4" />

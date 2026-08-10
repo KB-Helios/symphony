@@ -3,6 +3,7 @@ defmodule SymphonyElixirWeb.ErrorJSON do
 
   @spec render(String.t(), map()) :: map()
   def render(template, _assigns) do
-    %{error: %{code: "request_failed", message: Phoenix.Controller.status_message_from_template(template)}}
+    code = if String.starts_with?(template, "5"), do: "internal_server_error", else: "not_found"
+    %{error: %{code: code, message: Phoenix.Controller.status_message_from_template(template)}}
   end
 end

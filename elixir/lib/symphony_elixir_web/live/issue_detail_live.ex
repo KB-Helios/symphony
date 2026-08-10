@@ -15,6 +15,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
       |> assign(:identifier, identifier)
       |> assign(:current_path, "/sessions")
       |> assign(:result, load_issue(identifier))
+      |> assign(:page_title, "Symphony — #{identifier}")
 
     if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
 
@@ -30,12 +31,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   def render(assigns) do
     ~H"""
     <div class="space-y-6">
-      <.link
-        navigate="/sessions"
-        class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
-      >
-        <.icon name="hero-arrow-left" class="h-3.5 w-3.5" /> Back to sessions
-      </.link>
+      <.pill_link navigate="/sessions" icon_left="hero-arrow-left">Back to sessions</.pill_link>
 
       <%= case @result do %>
         <% {:ok, issue} -> %>
@@ -80,18 +76,16 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         </span>
       </:subtitle>
       <:actions>
-        <span class="inline-flex items-center rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm">
-          Harness: <span class="ml-1 font-semibold"><%= harness(@issue) %></span>
-        </span>
-        <.link
+        <.harness_badge harness={harness(@issue)} />
+        <.pill_link
           :if={external_issue_url(issue_url(@issue))}
           href={external_issue_url(issue_url(@issue))}
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
+          icon_right="hero-arrow-top-right-on-square"
         >
-          Open in tracker<span class="sr-only"> (opens in new tab)</span> <.icon name="hero-arrow-top-right-on-square" class="h-3.5 w-3.5" />
-        </.link>
+          Open in tracker<span class="sr-only"> (opens in new tab)</span>
+        </.pill_link>
       </:actions>
     </.header>
 
@@ -225,12 +219,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
       <.card_content class="p-0">
         <%= if @issue.recent_events == [] do %>
           <div class="p-6">
-            <div class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/20 py-10 text-center">
-              <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted text-muted-foreground">
-                <.icon name="hero-inbox" class="h-5 w-5" />
-              </span>
-              <p class="mt-3 text-sm text-muted-foreground">No events recorded yet.</p>
-            </div>
+            <.empty_state message="No events recorded yet." />
           </div>
         <% else %>
           <div class="p-6">

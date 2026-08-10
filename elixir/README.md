@@ -198,7 +198,10 @@ codex:
 - If a later reload fails, Symphony keeps running with the last known good workflow and logs the
   reload error until the file is fixed.
 - `server.port` or CLI `--port` enables the optional Phoenix LiveView dashboard and JSON API at
-  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, and `/api/v1/refresh`.
+  `/`, `/api/v1/state`, `/api/v1/<issue_identifier>`, `/api/v1/refresh`, and `/api/v1/health`.
+  `/api/v1/state` includes live polling status (`checking`, `next_poll_in_ms`, `poll_interval_ms`)
+  when the orchestrator exposes it, and answers `503` with an `error` envelope while the runtime
+  snapshot is unavailable or times out.
 
 ### Linear adapter profile
 
@@ -386,12 +389,14 @@ codex:
 
 ## Web dashboard
 
-The observability UI now runs on a minimal Phoenix stack:
+The observability UI runs on a minimal Phoenix stack:
 
-- LiveView for the dashboard at `/`
+- LiveView pages: operations overview at `/`, all tracked sessions at `/sessions`, and a per-issue
+  drill-down at `/sessions/<issue_identifier>`
 - JSON API for operational debugging under `/api/v1/*`
 - Bandit as the HTTP server
-- Phoenix dependency static assets for the LiveView client bootstrap
+- Static assets are compiled by Tailwind and esbuild into `priv/static/assets` (`mix assets.build`)
+  and served via `Plug.Static`; there is no separate embedded asset layer
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
 
 ## Project Layout
