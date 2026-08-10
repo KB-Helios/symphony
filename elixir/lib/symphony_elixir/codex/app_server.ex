@@ -543,8 +543,6 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp turn_completion_outcome(_payload), do: :completed
-
   defp turn_failure_details(turn_payload) when is_map(turn_payload) do
     %{
       "status" => Map.get(turn_payload, "status"),
@@ -648,8 +646,6 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp server_request?(payload) when is_map(payload) do
     Map.has_key?(payload, "id")
   end
-
-  defp server_request?(_payload), do: false
 
   defp respond_to_unsupported_request(port, payload, method) do
     request_id = Map.get(payload, "id")
