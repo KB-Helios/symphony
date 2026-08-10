@@ -416,6 +416,13 @@ defmodule SymphonyElixir.Orchestrator do
     reconcile_stalled_running_issues(state)
   end
 
+  @doc false
+  @spec spawn_issue_on_worker_host_for_test(term(), Issue.t(), term(), pid(), String.t() | nil) :: term()
+  def spawn_issue_on_worker_host_for_test(%State{} = state, %Issue{} = issue, attempt, recipient, worker_host)
+      when is_pid(recipient) do
+    spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+  end
+
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
@@ -1037,6 +1044,11 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.error("Unable to spawn agent for #{issue_context(issue)}: #{inspect(reason)}")
         next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
 
+        # Keep the issue claimed while its retry is queued; otherwise the next poll tick
+        # would redispatch it immediately and the pending retry could start a duplicate
+        # worker for the same issue (SPEC §7.1/§7.4).
+        state = %{state | claimed: MapSet.put(state.claimed, issue.id)}
+
         schedule_issue_retry(state, issue.id, next_attempt, %{
           identifier: issue.identifier,
           issue_url: issue.url,
@@ -1281,8 +1293,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp failure_retry_delay(attempt) do
-    max_delay_power = min(attempt - 1, 10)
-    min(@failure_retry_base_ms * (1 <<< max_delay_power), Config.settings!().agent.max_retry_backoff_ms)
+    # SPEC §8.4: delay = min(10000 * 2^(attempt - 1), agent.max_retry_backoff_ms)
+    min(@failure_retry_base_ms * (1 <<< (attempt - 1)), Config.settings!().agent.max_retry_backoff_ms)
   end
 
   defp normalize_retry_attempt(attempt) when is_integer(attempt) and attempt > 0, do: attempt

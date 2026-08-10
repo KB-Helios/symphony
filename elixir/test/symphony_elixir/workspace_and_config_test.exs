@@ -28,7 +28,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "git clone --depth 1 #{template_repo} ."
+        hook_after_create: "git clone --depth 1 #{String.replace(template_repo, "\\", "/")} ."
       )
 
       assert {:ok, workspace} = Workspace.create_for_issue("S-1")
@@ -1017,10 +1017,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert config.codex.command == "codex app-server"
 
     assert config.codex.approval_policy == %{
-             "reject" => %{
-               "sandbox_approval" => true,
-               "rules" => true,
-               "mcp_elicitations" => true
+             "granular" => %{
+               "sandbox_approval" => false,
+               "rules" => false,
+               "mcp_elicitations" => false,
+               "skill_approval" => false,
+               "request_permissions" => false
              }
            }
 
@@ -1402,14 +1404,14 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
              Schema.parse(%{
                tracker: %{kind: "linear", api_key: "$#{empty_secret_env}"},
                workspace: %{root: "$#{missing_workspace_env}"},
-               codex: %{approval_policy: %{reject: %{sandbox_approval: true}}}
+               codex: %{approval_policy: %{granular: %{sandbox_approval: false}}}
              })
 
     assert settings.tracker.api_key == nil
     assert settings.workspace.root == Path.join(System.tmp_dir!(), "symphony_workspaces")
 
     assert settings.codex.approval_policy == %{
-             "reject" => %{"sandbox_approval" => true}
+             "granular" => %{"sandbox_approval" => false}
            }
 
     assert {:ok, settings} =

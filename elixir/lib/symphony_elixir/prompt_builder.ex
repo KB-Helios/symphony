@@ -14,15 +14,7 @@ defmodule SymphonyElixir.PromptBuilder do
       |> prompt_template!()
       |> parse_template!()
 
-    template
-    |> Solid.render!(
-      %{
-        "attempt" => Keyword.get(opts, :attempt),
-        "issue" => issue |> Map.from_struct() |> to_solid_map()
-      },
-      @render_opts
-    )
-    |> IO.iodata_to_binary()
+    render_template!(template, issue, Keyword.get(opts, :attempt))
   end
 
   defp prompt_template!({:ok, %{prompt_template: prompt}}), do: default_prompt(prompt)
@@ -37,6 +29,24 @@ defmodule SymphonyElixir.PromptBuilder do
     error ->
       reraise %RuntimeError{
                 message: "template_parse_error: #{Exception.message(error)} template=#{inspect(prompt)}"
+              },
+              __STACKTRACE__
+  end
+
+  defp render_template!(template, issue, attempt) do
+    template
+    |> Solid.render!(
+      %{
+        "attempt" => attempt,
+        "issue" => issue |> Map.from_struct() |> to_solid_map()
+      },
+      @render_opts
+    )
+    |> IO.iodata_to_binary()
+  rescue
+    error ->
+      reraise %RuntimeError{
+                message: "template_render_error: #{Exception.message(error)}"
               },
               __STACKTRACE__
   end

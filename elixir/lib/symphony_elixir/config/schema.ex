@@ -179,12 +179,17 @@ defmodule SymphonyElixir.Config.Schema do
     embedded_schema do
       field(:command, :string, default: "codex app-server")
 
+      # Codex `AskForApproval::Granular` with every category set to `false`: approval
+      # prompts are auto-rejected server-side instead of being surfaced to this client
+      # (verified against `codex app-server generate-json-schema`, codex-cli 0.147.0).
       field(:approval_policy, StringOrMap,
         default: %{
-          "reject" => %{
-            "sandbox_approval" => true,
-            "rules" => true,
-            "mcp_elicitations" => true
+          "granular" => %{
+            "sandbox_approval" => false,
+            "rules" => false,
+            "mcp_elicitations" => false,
+            "skill_approval" => false,
+            "request_permissions" => false
           }
         }
       )
@@ -222,7 +227,6 @@ defmodule SymphonyElixir.Config.Schema do
       end)
       |> validate_number(:turn_timeout_ms, greater_than: 0)
       |> validate_number(:read_timeout_ms, greater_than: 0)
-      |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
     end
   end
 
@@ -282,7 +286,6 @@ defmodule SymphonyElixir.Config.Schema do
       end)
       |> validate_number(:turn_timeout_ms, greater_than: 0)
       |> validate_number(:read_timeout_ms, greater_than: 0)
-      |> validate_number(:stall_timeout_ms, greater_than_or_equal_to: 0)
     end
   end
 

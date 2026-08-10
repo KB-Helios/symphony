@@ -43,7 +43,9 @@ defmodule SymphonyElixir.SSH do
 
     []
     |> maybe_put_config()
-    |> Kernel.++(["-T"])
+    # BatchMode: never prompt interactively (host key, password). A prompt would block or
+    # corrupt the JSON-RPC stdio channel; connection problems must fail fast instead.
+    |> Kernel.++(["-T", "-o", "BatchMode=yes"])
     |> maybe_put_port(port)
     |> Kernel.++([destination, remote_shell_command(command)])
   end
