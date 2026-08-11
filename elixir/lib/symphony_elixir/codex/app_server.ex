@@ -1031,6 +1031,11 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:response_error, response_payload}}
 
       {:ok, %{} = other} ->
+        if server_request?(other) do
+          method = Map.get(other, "method")
+          respond_to_unsupported_request(port, other, method)
+        end
+
         Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
         with_timeout_response(port, request_id, deadline_ms, "")
 
