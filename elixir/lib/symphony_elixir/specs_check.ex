@@ -33,7 +33,10 @@ defmodule SymphonyElixir.SpecsCheck do
         [path]
 
       File.dir?(path) ->
-        Path.wildcard(Path.join(path, "**/*.ex"))
+        # filelib wildcard patterns treat `\` as an escape character, so normalize
+        # separators first — otherwise directories with backslashes (for example
+        # Windows temp dirs) silently match nothing.
+        Path.wildcard(String.replace(Path.join(path, "**/*.ex"), "\\", "/"))
 
       true ->
         []

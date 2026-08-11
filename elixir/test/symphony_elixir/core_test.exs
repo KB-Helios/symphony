@@ -475,6 +475,52 @@ defmodule SymphonyElixir.CoreTest do
     assert {:ok, []} = Client.fetch_issues_by_ids([])
   end
 
+  test "failed worker spawn keeps the issue claimed while the retry is queued" do
+    defmodule SpawnDenyingSupervisor do
+      use GenServer
+
+      @impl true
+      def init(_state), do: {:ok, %{}}
+
+      @impl true
+      def handle_call({:start_task, _args, _restart, _shutdown}, _from, state) do
+        {:reply, {:error, :spawn_denied}, state}
+      end
+    end
+
+    issue_id = "issue-spawn-failure"
+    issue_identifier = "MT-SPAWN"
+
+    {:ok, fake_supervisor} = GenServer.start_link(SpawnDenyingSupervisor, [])
+
+    state = %Orchestrator.State{
+      task_supervisor: fake_supervisor,
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    issue = %Issue{
+      id: issue_id,
+      identifier: issue_identifier,
+      state: "Todo",
+      title: "Spawn failure keeps claim",
+      description: "Ensure spawn failures do not leak the claim",
+      labels: []
+    }
+
+    capture_log(fn ->
+      updated_state =
+        Orchestrator.spawn_issue_on_worker_host_for_test(state, issue, nil, self(), nil)
+
+      assert MapSet.member?(updated_state.claimed, issue_id)
+      refute Map.has_key?(updated_state.running, issue_id)
+      assert %{attempt: 1, error: error} = Map.fetch!(updated_state.retry_attempts, issue_id)
+      assert error =~ "failed to spawn agent"
+    end)
+  end
+
   test "non-active issue state stops running agent without cleaning workspace" do
     test_root =
       Path.join(
@@ -1385,9 +1431,13 @@ defmodule SymphonyElixir.CoreTest do
       labels: ["bug"]
     }
 
-    assert_raise Solid.RenderError, fn ->
-      PromptBuilder.build_prompt(issue)
-    end
+    error =
+      assert_raise RuntimeError, fn ->
+        PromptBuilder.build_prompt(issue)
+      end
+
+    assert error.message =~ "template_render_error"
+    assert error.message =~ "missing.ticket_id"
   end
 
   test "prompt builder surfaces invalid template content with prompt context" do
@@ -1585,8 +1635,8 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        hook_after_create: "cp #{String.replace(Path.join(template_repo, "README.md"), "\\", "/")} README.md",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1670,8 +1720,8 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server"
+        hook_after_create: "cp #{String.replace(Path.join(template_repo, "README.md"), "\\", "/")} README.md",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1836,8 +1886,8 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        hook_after_create: "cp #{String.replace(Path.join(template_repo, "README.md"), "\\", "/")} README.md",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         max_turns: 3
       )
 
@@ -1967,8 +2017,8 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        hook_after_create: "cp #{Path.join(template_repo, "README.md")} README.md",
-        codex_command: "#{codex_binary} app-server",
+        hook_after_create: "cp #{String.replace(Path.join(template_repo, "README.md"), "\\", "/")} README.md",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         max_turns: 2
       )
 
@@ -2067,7 +2117,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -2099,10 +2149,12 @@ defmodule SymphonyElixir.CoreTest do
                  |> Jason.decode!()
                  |> then(fn payload ->
                    expected_approval_policy = %{
-                     "reject" => %{
-                       "sandbox_approval" => true,
-                       "rules" => true,
-                       "mcp_elicitations" => true
+                     "granular" => %{
+                       "sandbox_approval" => false,
+                       "rules" => false,
+                       "mcp_elicitations" => false,
+                       "skill_approval" => false,
+                       "request_permissions" => false
                      }
                    }
 
@@ -2132,10 +2184,12 @@ defmodule SymphonyElixir.CoreTest do
                  |> Jason.decode!()
                  |> then(fn payload ->
                    expected_approval_policy = %{
-                     "reject" => %{
-                       "sandbox_approval" => true,
-                       "rules" => true,
-                       "mcp_elicitations" => true
+                     "granular" => %{
+                       "sandbox_approval" => false,
+                       "rules" => false,
+                       "mcp_elicitations" => false,
+                       "skill_approval" => false,
+                       "request_permissions" => false
                      }
                    }
 
@@ -2211,7 +2265,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} --config 'model=\"gpt-5.5\"' app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} --config 'model=\"gpt-5.5\"' app-server"
       )
 
       issue = %Issue{
@@ -2300,7 +2354,7 @@ defmodule SymphonyElixir.CoreTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_approval_policy: "on-request",
         codex_thread_sandbox: "workspace-write",
         codex_turn_sandbox_policy: %{

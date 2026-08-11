@@ -48,6 +48,11 @@ erl_crash.dump
 status.txt
 .codex/original-user-prompt.txt
 
+# Machine-local run configuration.
+/WORKFLOW.local.md
+/start-local.ps1
+/start-local.exs
+
 # Also ignore archive artifacts (built via "mix archive.build").
 *.ez
 

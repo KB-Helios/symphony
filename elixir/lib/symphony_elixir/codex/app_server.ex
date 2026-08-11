@@ -26,12 +26,18 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(workspace, prompt, issue, opts \\ []) do
-    with {:ok, session} <- start_session(workspace, opts) do
-      try do
-        run_turn(session, prompt, issue, opts)
-      after
-        stop_session(session)
-      end
+    case start_session(workspace, opts) do
+      {:ok, session} ->
+        try do
+          run_turn(session, prompt, issue, opts)
+        after
+          stop_session(session)
+        end
+
+      {:error, reason} ->
+        on_message = Keyword.get(opts, :on_message, &default_on_message/1)
+        emit_message(on_message, :startup_failed, %{reason: reason}, %{})
+        {:error, reason}
     end
   end
 
@@ -63,7 +69,7 @@ defmodule SymphonyElixir.Codex.AppServer do
       else
         {:error, reason} ->
           stop_port(port)
-          {:error, reason}
+          {:error, normalize_start_error(reason)}
       end
     end
   end
@@ -146,6 +152,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   def stop_session(%{port: port}) when is_port(port) do
     stop_port(port)
   end
+
+  # bash exits 127 when the configured command is missing; surface the spec's normalized
+  # `codex_not_found` category (SPEC §10.6) instead of a bare exit status.
+  defp normalize_start_error({:port_exit, 127}), do: :codex_not_found
+  defp normalize_start_error(reason), do: reason
 
   defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
     expanded_workspace = Path.expand(workspace)
@@ -344,7 +355,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
+  defp start_turn(port, thread_id, prompt, _issue, workspace, approval_policy, turn_sandbox_policy) do
     send_message(port, %{
       "method" => "turn/start",
       "id" => @turn_start_id,
@@ -357,7 +368,6 @@ defmodule SymphonyElixir.Codex.AppServer do
           }
         ],
         "cwd" => workspace,
-        "title" => "#{issue.identifier}: #{issue.title}",
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
       }
@@ -409,8 +419,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     case Jason.decode(payload_string) do
       {:ok, %{"method" => "turn/completed"} = payload} ->
-        emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
-        {:ok, :turn_completed}
+        handle_turn_completed(port, on_message, payload, payload_string)
 
       {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
         emit_turn_event(
@@ -494,6 +503,53 @@ defmodule SymphonyElixir.Codex.AppServer do
     )
   end
 
+  # The v2 app-server protocol signals every terminal turn state through the single
+  # `turn/completed` notification; `params.turn.status` is "completed", "failed", or
+  # "interrupted" and `params.turn.error` carries the failure detail. A missing status
+  # (legacy or mock servers) is treated as "completed".
+  defp handle_turn_completed(port, on_message, payload, payload_string) do
+    case turn_completion_outcome(payload) do
+      :completed ->
+        emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
+        {:ok, :turn_completed}
+
+      {:failed, details} ->
+        emit_turn_event(on_message, :turn_failed, payload, payload_string, port, details)
+        {:error, {:turn_failed, details}}
+
+      {:cancelled, details} ->
+        emit_turn_event(on_message, :turn_cancelled, payload, payload_string, port, details)
+        {:error, {:turn_cancelled, details}}
+    end
+  end
+
+  defp turn_completion_outcome(payload) when is_map(payload) do
+    turn =
+      case Map.get(payload, "params") do
+        params when is_map(params) -> Map.get(params, "turn")
+        _ -> nil
+      end
+
+    case turn do
+      %{"status" => status} = turn_payload when is_binary(status) ->
+        case String.downcase(status) do
+          "completed" -> :completed
+          "interrupted" -> {:cancelled, turn_failure_details(turn_payload)}
+          _ -> {:failed, turn_failure_details(turn_payload)}
+        end
+
+      _ ->
+        :completed
+    end
+  end
+
+  defp turn_failure_details(turn_payload) when is_map(turn_payload) do
+    %{
+      "status" => Map.get(turn_payload, "status"),
+      "error" => Map.get(turn_payload, "error")
+    }
+  end
+
   defp handle_turn_method(
          port,
          on_message,
@@ -540,30 +596,69 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:approval_required, payload}}
 
       :unhandled ->
-        if needs_input?(method, payload) do
-          emit_message(
-            on_message,
-            :turn_input_required,
-            %{payload: payload, raw: payload_string},
-            metadata
-          )
+        cond do
+          needs_input?(method, payload) ->
+            emit_message(
+              on_message,
+              :turn_input_required,
+              %{payload: payload, raw: payload_string},
+              metadata
+            )
 
-          {:error, {:turn_input_required, payload}}
-        else
-          emit_message(
-            on_message,
-            :notification,
-            %{
-              payload: payload,
-              raw: payload_string
-            },
-            metadata
-          )
+            {:error, {:turn_input_required, payload}}
 
-          Logger.debug("Codex notification: #{inspect(method)}")
-          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          server_request?(payload) ->
+            # JSON-RPC requests carry an "id" and block the app-server until answered.
+            # Reply with a "method not found" error so unsupported requests (for example
+            # `item/permissions/requestApproval` or `account/chatgptAuthTokens/refresh`)
+            # never stall the turn (SPEC §10.5).
+            respond_to_unsupported_request(port, payload, method)
+
+            emit_message(
+              on_message,
+              :notification,
+              %{
+                payload: payload,
+                raw: payload_string
+              },
+              metadata
+            )
+
+            receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+
+          true ->
+            emit_message(
+              on_message,
+              :notification,
+              %{
+                payload: payload,
+                raw: payload_string
+              },
+              metadata
+            )
+
+            Logger.debug("Codex notification: #{inspect(method)}")
+            receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
         end
     end
+  end
+
+  defp server_request?(payload) when is_map(payload) do
+    Map.has_key?(payload, "id")
+  end
+
+  defp respond_to_unsupported_request(port, payload, method) do
+    request_id = Map.get(payload, "id")
+
+    Logger.warning("Answering unsupported Codex request method=#{inspect(method)} with a JSON-RPC error")
+
+    send_message(port, %{
+      "id" => request_id,
+      "error" => %{
+        "code" => -32_601,
+        "message" => "Symphony does not support Codex request method #{inspect(method)}"
+      }
+    })
   end
 
   defp maybe_handle_approval_request(
@@ -897,27 +992,32 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp await_response(port, request_id) do
-    with_timeout_response(port, request_id, Config.settings!().codex.read_timeout_ms, "")
+    # SPEC §10.6: read_timeout_ms is a request/response deadline, not a per-line silence
+    # window — unrelated notifications must not extend it.
+    deadline_ms = System.monotonic_time(:millisecond) + Config.settings!().codex.read_timeout_ms
+    with_timeout_response(port, request_id, deadline_ms, "")
   end
 
-  defp with_timeout_response(port, request_id, timeout_ms, pending_line) do
+  defp with_timeout_response(port, request_id, deadline_ms, pending_line) do
+    remaining_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         complete_line = pending_line <> to_string(chunk)
-        handle_response(port, request_id, complete_line, timeout_ms)
+        handle_response(port, request_id, complete_line, deadline_ms)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        with_timeout_response(port, request_id, timeout_ms, pending_line <> to_string(chunk))
+        with_timeout_response(port, request_id, deadline_ms, pending_line <> to_string(chunk))
 
       {^port, {:exit_status, status}} ->
         {:error, {:port_exit, status}}
     after
-      timeout_ms ->
+      remaining_ms ->
         {:error, :response_timeout}
     end
   end
 
-  defp handle_response(port, request_id, data, timeout_ms) do
+  defp handle_response(port, request_id, data, deadline_ms) do
     payload = to_string(data)
 
     case Jason.decode(payload) do
@@ -931,12 +1031,17 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:response_error, response_payload}}
 
       {:ok, %{} = other} ->
+        if server_request?(other) do
+          method = Map.get(other, "method")
+          respond_to_unsupported_request(port, other, method)
+        end
+
         Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        with_timeout_response(port, request_id, deadline_ms, "")
 
       {:error, _} ->
         log_non_json_stream_line(payload, "response stream")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        with_timeout_response(port, request_id, deadline_ms, "")
     end
   end
 

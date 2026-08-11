@@ -117,7 +117,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_turn_timeout_ms: 250
       )
 
@@ -155,7 +155,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_turn_timeout_ms: 100
       )
 
@@ -244,7 +244,7 @@ defmodule SymphonyElixir.AppServerTest do
 
         write_workflow_file!(Workflow.workflow_file_path(),
           workspace_root: workspace_root,
-          codex_command: "#{codex_binary} app-server",
+          codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
           codex_turn_sandbox_policy: configured_policy
         )
 
@@ -329,7 +329,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -394,7 +394,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -457,7 +457,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -540,7 +540,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_approval_policy: "never"
       )
 
@@ -677,7 +677,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_approval_policy: "never"
       )
 
@@ -762,7 +762,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_approval_policy: "never"
       )
 
@@ -832,7 +832,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server",
         codex_approval_policy: "never"
       )
 
@@ -916,7 +916,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1017,7 +1017,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1139,7 +1139,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1229,7 +1229,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1293,7 +1293,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1368,7 +1368,7 @@ defmodule SymphonyElixir.AppServerTest do
 
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1473,7 +1473,7 @@ defmodule SymphonyElixir.AppServerTest do
       write_workflow_file!(Workflow.workflow_file_path(),
         workspace_root: workspace_root,
         tracker_api_token: "$#{custom_secret_env}",
-        codex_command: "#{codex_binary} app-server"
+        codex_command: "#{String.replace(codex_binary, "\\", "/")} app-server"
       )
 
       issue = %Issue{
@@ -1580,7 +1580,7 @@ defmodule SymphonyElixir.AppServerTest do
       lines = String.split(trace, "\n", trim: true)
 
       assert argv_line = Enum.find(lines, &String.starts_with?(&1, "ARGV:"))
-      assert argv_line =~ "-T -p 2200 worker-01 bash -lc"
+      assert argv_line =~ "-T -o BatchMode=yes -p 2200 worker-01 bash -lc"
       assert argv_line =~ "cd "
       assert argv_line =~ remote_workspace
       assert argv_line =~ "unset LINEAR_API_KEY"
@@ -1620,6 +1620,321 @@ defmodule SymphonyElixir.AppServerTest do
                      get_in(payload, ["params", "cwd"]) == remote_workspace &&
                      get_in(payload, ["params", "sandboxPolicy"]) == expected_turn_policy
                  end)
+               else
+                 false
+               end
+             end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server treats a turn/completed with failed status as a turn failure" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-turn-failed-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-FAILED")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-failed"}}}' ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-failed"}}}'
+            printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-failed","turn":{"id":"turn-failed","items":[],"status":"failed","error":{"message":"model blew up"}}}}'
+            exit 0
+            ;;
+          *) exit 0 ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{Path.expand(codex_binary) |> String.replace("\\", "/")} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-turn-failed",
+        identifier: "MT-FAILED",
+        title: "Failed turn status",
+        description: "Ensure failed turn completions surface as errors",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-FAILED",
+        labels: ["backend"]
+      }
+
+      assert {:error, {:turn_failed, %{"status" => "failed", "error" => %{"message" => "model blew up"}}}} =
+               AppServer.run(workspace, "fail the turn", issue)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server treats a turn/completed with interrupted status as a turn cancellation" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-turn-interrupted-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-INTERRUPTED")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+        case "$count" in
+          1) printf '%s\\n' '{"id":1,"result":{}}' ;;
+          2) ;;
+          3) printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-interrupted"}}}' ;;
+          4)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-interrupted"}}}'
+            printf '%s\\n' '{"method":"turn/completed","params":{"threadId":"thread-interrupted","turn":{"id":"turn-interrupted","items":[],"status":"interrupted","error":null}}}'
+            exit 0
+            ;;
+          *) exit 0 ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{Path.expand(codex_binary) |> String.replace("\\", "/")} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-turn-interrupted",
+        identifier: "MT-INTERRUPTED",
+        title: "Interrupted turn status",
+        description: "Ensure interrupted turn completions surface as errors",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-INTERRUPTED",
+        labels: ["backend"]
+      }
+
+      assert {:error, {:turn_cancelled, %{"status" => "interrupted"}}} =
+               AppServer.run(workspace, "interrupt the turn", issue)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server answers unsupported server requests with a JSON-RPC error instead of stalling" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-unknown-request-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-UNKNOWN-REQ")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-unknown-request.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODex_TRACE")
+
+      on_exit(fn ->
+        if is_binary(previous_trace) do
+          System.put_env("SYMP_TEST_CODex_TRACE", previous_trace)
+        else
+          System.delete_env("SYMP_TEST_CODex_TRACE")
+        end
+      end)
+
+      System.put_env(
+        "SYMP_TEST_CODex_TRACE",
+        Path.expand(trace_file) |> String.replace("\\", "/")
+      )
+
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODex_TRACE:-/tmp/codex-unknown-request.trace}"
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' \"$line\" >> \"$trace_file\"
+
+        case \"$count\" in
+          1)
+            printf '%s\\n' '{\"id\":1,\"result\":{}}'
+            ;;
+          2)
+            ;;
+          3)
+            printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-unknown\"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-unknown\"}}}'
+            printf '%s\\n' '{\"id\":42,\"method\":\"item/permissions/requestApproval\",\"params\":{\"itemId\":\"perm-1\",\"threadId\":\"thread-unknown\",\"turnId\":\"turn-unknown\"}}'
+            ;;
+          5)
+            printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-unknown\",\"turn\":{\"id\":\"turn-unknown\",\"items\":[],\"status\":\"completed\"}}}'
+            exit 0
+            ;;
+          *)
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{Path.expand(codex_binary) |> String.replace("\\", "/")} app-server",
+        codex_approval_policy: "never",
+        codex_turn_timeout_ms: 2_000
+      )
+
+      issue = %Issue{
+        id: "issue-unknown-request",
+        identifier: "MT-UNKNOWN-REQ",
+        title: "Unknown server request",
+        description: "Ensure unsupported server requests receive an error response",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-UNKNOWN-REQ",
+        labels: ["backend"]
+      }
+
+      assert {:ok, _result} = AppServer.run(workspace, "answer unknown request", issue)
+
+      trace = File.read!(trace_file)
+      lines = String.split(trace, "\n", trim: true)
+
+      assert Enum.any?(lines, fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 payload =
+                   line
+                   |> String.trim_leading("JSON:")
+                   |> Jason.decode!()
+
+                 payload["id"] == 42 and get_in(payload, ["error", "code"]) == -32_601
+               else
+                 false
+               end
+             end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server answers unsupported server requests received before initialization response" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-pre-init-request-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-PRE-INIT")
+      codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-pre-init-request.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
+
+      on_exit(fn ->
+        if is_binary(previous_trace) do
+          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
+        else
+          System.delete_env("SYMP_TEST_CODEx_TRACE")
+        end
+      end)
+
+      System.put_env(
+        "SYMP_TEST_CODex_TRACE",
+        Path.expand(trace_file) |> String.replace("\\", "/")
+      )
+
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-pre-init-request.trace}"
+      count=0
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' \"$line\" >> \"$trace_file\"
+
+        case \"$count\" in
+          1)
+            printf '%s\\n' '{\"id\":999,\"method\":\"account/chatgptAuthTokens/refresh\",\"params\":{}}'
+            printf '%s\\n' '{\"id\":1,\"result\":{}}'
+            ;;
+          2)
+            ;;
+          3)
+            printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-pre-init\"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-pre-init\"}}}'
+            ;;
+          5)
+            printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"thread-pre-init\",\"turn\":{\"id\":\"turn-pre-init\",\"items\":[],\"status\":\"completed\"}}}'
+            exit 0
+            ;;
+          *)
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{Path.expand(codex_binary) |> String.replace("\\", "/")} app-server",
+        codex_approval_policy: "never"
+      )
+
+      issue = %Issue{
+        id: "issue-pre-init-request",
+        identifier: "MT-PRE-INIT",
+        title: "Pre-initialization server request",
+        description: "Ensure server requests received before init response get error reply",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-PRE-INIT",
+        labels: ["backend"]
+      }
+
+      assert {:ok, _result} = AppServer.run(workspace, "handle pre-init request", issue)
+
+      trace = File.read!(trace_file)
+      lines = String.split(trace, "\n", trim: true)
+
+      assert Enum.any?(lines, fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 payload =
+                   line
+                   |> String.trim_leading("JSON:")
+                   |> Jason.decode!()
+
+                 payload["id"] == 999 and get_in(payload, ["error", "code"]) == -32_601
                else
                  false
                end
