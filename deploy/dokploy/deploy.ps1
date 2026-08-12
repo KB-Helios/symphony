@@ -34,7 +34,8 @@ function Invoke-Rtk {
 function Get-TargetInstance {
     $json = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "instances", "describe", $Instance,
-        "--zone", $Zone, "--project", $Project, "--format=json"
+        "--zone", $Zone, "--project", $Project,
+        "--format=json(name,zone,status,scheduling.provisioningModel,disks.source)"
     )
     $vm = $json | ConvertFrom-Json
 
@@ -67,7 +68,7 @@ function Get-BootDiskIdentity {
     $diskName = Split-Path -Leaf $source
     $json = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "disks", "describe", $diskName,
-        "--zone", $Zone, "--project", $Project, "--format=json"
+        "--zone", $Zone, "--project", $Project, "--format=json(id,selfLink)"
     )
     $disk = $json | ConvertFrom-Json
     return [pscustomobject]@{

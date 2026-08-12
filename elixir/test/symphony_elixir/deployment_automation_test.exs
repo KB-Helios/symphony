@@ -16,6 +16,8 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert deploy =~ "machine-images\", \"describe"
     assert deploy =~ "bootDiskId"
     assert deploy =~ "PreparationMaxAgeMinutes"
+    assert deploy =~ "--format=json(name,zone,status,scheduling.provisioningModel,disks.source)"
+    assert deploy =~ "--format=json(id,selfLink)"
     assert deploy =~ "Remove-Item -LiteralPath $PreparationMarker"
     assert deploy =~ "/models"
     assert deploy =~ "domain.byComposeId"
