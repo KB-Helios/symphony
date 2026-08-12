@@ -35,7 +35,7 @@ function Get-TargetInstance {
     $json = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "instances", "describe", $Instance,
         "--zone", $Zone, "--project", $Project,
-        "--format=json(name,zone,status,scheduling.provisioningModel,disks.source)"
+        "--format=json(name,zone,status,scheduling.provisioningModel)"
     )
     $vm = $json | ConvertFrom-Json
 
@@ -59,20 +59,21 @@ function Start-Target {
 }
 
 function Get-BootDiskIdentity {
-    param([Parameter(Mandatory)]$Vm)
+    $diskNameOutput = Invoke-Rtk -Arguments @(
+        "gcloud.cmd", "compute", "instances", "describe", $Instance,
+        "--zone", $Zone, "--project", $Project,
+        "--format=value(disks[0].source.basename())"
+    )
+    $diskName = ($diskNameOutput | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($diskName)) { throw "Target VM has no boot disk" }
 
-    $source = [string]$Vm.disks[0].source
-    if ([string]::IsNullOrWhiteSpace($source)) {
-        throw "Target VM has no boot disk source"
-    }
-    $diskName = Split-Path -Leaf $source
     $json = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "disks", "describe", $diskName,
         "--zone", $Zone, "--project", $Project, "--format=json(id,selfLink)"
     )
     $disk = $json | ConvertFrom-Json
     return [pscustomobject]@{
-        Source = $source
+        Source = [string]$disk.selfLink
         Id = [string]$disk.id
     }
 }
@@ -174,7 +175,7 @@ function Assert-RollbackPrepared {
     }
 
     $vm = Get-TargetInstance
-    $bootDisk = Get-BootDiskIdentity -Vm $vm
+    $bootDisk = Get-BootDiskIdentity
     if ($proof.bootDiskSource -ne $bootDisk.Source -or [string]$proof.bootDiskId -ne $bootDisk.Id) {
         throw "Rollback proof boot disk no longer matches the target VM"
     }
@@ -199,7 +200,7 @@ function Assert-RollbackPrepared {
 
 function Prepare-Rollback {
     $vm = Get-TargetInstance
-    $bootDisk = Get-BootDiskIdentity -Vm $vm
+    $bootDisk = Get-BootDiskIdentity
     Write-Host "Target verified: $($vm.name) ($($vm.status))"
     Start-Target
 
