@@ -31,6 +31,13 @@ function Invoke-Rtk {
     return $output
 }
 
+function ConvertTo-RemoteBashCommand {
+    param([Parameter(Mandatory)][string]$Script)
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    return "printf '%s' '$encoded' | base64 -d | bash"
+}
+
 function Get-TargetInstance {
     $json = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "instances", "describe", $Instance,
@@ -223,10 +230,11 @@ sudo test -s "$backup_dir/dokploy-etc.tar.gz"
 sudo sync
 '@.Replace("__BACKUP_DIR__", $backupDir)
 
+    $remoteBackupCommand = ConvertTo-RemoteBashCommand -Script $remoteBackup
     $backupProof = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "ssh", $Instance,
         "--zone", $Zone, "--project", $Project,
-        "--command=$remoteBackup"
+        "--command=$remoteBackupCommand"
     )
     Write-Host "Dokploy backup verified at $backupDir"
     $backupProof | ForEach-Object { Write-Host $_ }

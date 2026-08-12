@@ -19,6 +19,7 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert deploy =~ "--format=json(name,zone,status,scheduling.provisioningModel)"
     assert deploy =~ "--format=value(disks[0].source.basename())"
     assert deploy =~ "--format=value(id)"
+    assert deploy =~ "ToBase64String"
     assert deploy =~ "Remove-Item -LiteralPath $PreparationMarker"
     assert deploy =~ "/models"
     assert deploy =~ "domain.byComposeId"
@@ -37,5 +38,6 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert verify =~ "public port 4021"
     assert verify =~ "domain.byComposeId"
     assert verify =~ "tailscale funnel status"
+    assert verify =~ "ToBase64String"
   end
 end

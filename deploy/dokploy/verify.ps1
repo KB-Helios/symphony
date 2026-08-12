@@ -36,6 +36,13 @@ function Invoke-Rtk {
     return @{ Code = $code; Output = $output }
 }
 
+function ConvertTo-RemoteBashCommand {
+    param([Parameter(Mandatory)][string]$Script)
+
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
+    return "printf '%s' '$encoded' | base64 -d | bash"
+}
+
 $vmResult = Invoke-Rtk -Arguments @(
     "gcloud.cmd", "compute", "instances", "describe", $Instance,
     "--zone", $Zone, "--project", $Project, "--format=json"
@@ -68,10 +75,11 @@ if printf '%s' "$compact_funnel" | grep -Eq '"AllowFunnel":\{[^}]*true'; then
   exit 1
 fi
 '@
+$remoteCommand = ConvertTo-RemoteBashCommand -Script $remote
 Invoke-Rtk -Arguments @(
     "gcloud.cmd", "compute", "ssh", $Instance,
     "--zone", $Zone, "--project", $Project,
-    "--command=$remote"
+    "--command=$remoteCommand"
 ) | Out-Null
 
 $health = Invoke-WebRequest -Uri "$SymphonyUrl/api/v1/health" -TimeoutSec 10
