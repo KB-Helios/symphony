@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Budget, Config, RuntimeState, StateStore, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -33,12 +33,23 @@ defmodule SymphonyElixir.Orchestrator do
       :poll_check_in_progress,
       :tick_timer_ref,
       :tick_token,
+      :state_path,
+      :state_store,
+      :runner,
+      :recovery_backoff_ms,
+      :last_tracker_poll_success_at,
+      :last_tracker_poll_error,
+      :persistence_error,
+      :last_checkpoint_at_ms,
       task_supervisor: SymphonyElixir.TaskSupervisor,
+      dispatch_enabled: true,
+      draining: false,
       running: %{},
       completed: MapSet.new(),
       claimed: MapSet.new(),
       blocked: %{},
       retry_attempts: %{},
+      budgets: %{},
       codex_totals: nil,
       codex_rate_limits: nil
     ]
@@ -65,12 +76,26 @@ defmodule SymphonyElixir.Orchestrator do
           tick_timer_ref: nil,
           tick_token: nil,
           task_supervisor: Keyword.get(opts, :task_supervisor, SymphonyElixir.TaskSupervisor),
+          state_path:
+            Keyword.get(
+              opts,
+              :state_path,
+              Application.get_env(:symphony_elixir, :runtime_state_path)
+            ),
+          state_store: Keyword.get(opts, :state_store, StateStore),
+          runner: Keyword.get(opts, :runner, &AgentRunner.run/3),
+          recovery_backoff_ms: Keyword.get(opts, :recovery_backoff_ms, config.runtime.recovery_backoff_ms),
           codex_totals: @empty_codex_totals,
           codex_rate_limits: nil
         }
 
+        state = restore_runtime_state(state)
         run_terminal_workspace_cleanup()
-        state = schedule_tick(state, 0)
+
+        state =
+          state
+          |> schedule_recovered_claims()
+          |> schedule_tick(0)
 
         {:ok, state}
 
@@ -80,6 +105,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @impl true
+  def handle_info({:tick, _tick_token}, %{dispatch_enabled: false} = state),
+    do: {:noreply, state}
+
+  def handle_info({:tick, _tick_token}, %{draining: true} = state), do: {:noreply, state}
+
   def handle_info({:tick, tick_token}, %{tick_token: tick_token} = state)
       when is_reference(tick_token) do
     state = refresh_runtime_config(state)
@@ -99,6 +129,9 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:tick, _tick_token}, state), do: {:noreply, state}
 
+  def handle_info(:tick, %{dispatch_enabled: false} = state), do: {:noreply, state}
+  def handle_info(:tick, %{draining: true} = state), do: {:noreply, state}
+
   def handle_info(:tick, state) do
     state = refresh_runtime_config(state)
 
@@ -116,13 +149,22 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   def handle_info(:run_poll_cycle, state) do
-    state = refresh_runtime_config(state)
-    state = maybe_dispatch(state)
-    state = schedule_tick(state, state.poll_interval_ms)
-    state = %{state | poll_check_in_progress: false}
+    if state.dispatch_enabled and not state.draining do
+      state = refresh_runtime_config(state)
+      state = maybe_dispatch(state)
+      state = schedule_tick(state, state.poll_interval_ms)
+      state = %{state | poll_check_in_progress: false}
 
-    notify_dashboard()
-    {:noreply, state}
+      notify_dashboard()
+      {:noreply, state}
+    else
+      {:noreply, %{state | poll_check_in_progress: false}}
+    end
+  end
+
+  def handle_info(:drain_deadline, state) do
+    state = stop_all_running_tasks(state)
+    {:noreply, persist_or_disable(state)}
   end
 
   def handle_info(
@@ -138,6 +180,7 @@ defmodule SymphonyElixir.Orchestrator do
         state = record_session_completion_totals(state, running_entry)
         session_id = running_entry_session_id(running_entry)
 
+        state = record_budget_completion(state, issue_id, reason)
         state = handle_agent_down(reason, state, issue_id, running_entry, session_id)
 
         Logger.info("Agent task finished for issue_id=#{issue_id} issue_identifier=#{Map.get(running_entry, :identifier, issue_id)} session_id=#{session_id} reason=#{inspect(reason)}")
@@ -160,8 +203,13 @@ defmodule SymphonyElixir.Orchestrator do
           |> maybe_put_runtime_value(:workspace_path, runtime_info[:workspace_path])
           |> maybe_put_runtime_value(:harness, runtime_info[:harness])
 
+        state =
+          state
+          |> Map.put(:running, Map.put(running, issue_id, updated_running_entry))
+          |> persist_or_disable()
+
         notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+        {:noreply, state}
     end
   end
 
@@ -180,9 +228,13 @@ defmodule SymphonyElixir.Orchestrator do
           state
           |> apply_codex_token_delta(token_delta)
           |> apply_codex_rate_limits(update)
+          |> update_issue_budget(issue_id, update, token_delta)
+
+        state = %{state | running: Map.put(running, issue_id, updated_running_entry)}
+        state = maybe_persist_telemetry(state, update)
 
         notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+        {:noreply, state}
     end
   end
 
@@ -263,50 +315,56 @@ defmodule SymphonyElixir.Orchestrator do
       |> reconcile_blocked_issues()
 
     with :ok <- Config.validate!(),
-         {:ok, issues} <- Tracker.fetch_issues_by_states(Config.settings!().tracker.active_states),
-         true <- available_slots(state) > 0 do
-      choose_issues(issues, state)
+         {:ok, issues} <- Tracker.fetch_issues_by_states(Config.settings!().tracker.active_states) do
+      state =
+        state
+        |> Map.put(:last_tracker_poll_success_at, DateTime.utc_now())
+        |> Map.put(:last_tracker_poll_error, nil)
+        |> persist_or_disable()
+
+      if state.dispatch_enabled and not state.draining and available_slots(state) > 0 do
+        choose_issues(issues, state)
+      else
+        state
+      end
     else
       {:error, :missing_linear_api_token} ->
         Logger.error("Tracker API token missing in WORKFLOW.md")
-        state
+        record_poll_error(state, :missing_tracker_token)
 
       {:error, :missing_linear_project_slug} ->
         Logger.error("Tracker project scope missing in WORKFLOW.md")
-        state
+        record_poll_error(state, :missing_tracker_scope)
 
       {:error, :missing_tracker_kind} ->
         Logger.error("Tracker kind missing in WORKFLOW.md")
 
-        state
+        record_poll_error(state, :missing_tracker_kind)
 
       {:error, {:unsupported_tracker_kind, kind}} ->
         Logger.error("Unsupported tracker kind in WORKFLOW.md: #{inspect(kind)}")
 
-        state
+        record_poll_error(state, :unsupported_tracker_kind)
 
       {:error, {:invalid_workflow_config, message}} ->
         Logger.error("Invalid WORKFLOW.md config: #{message}")
-        state
+        record_poll_error(state, :invalid_workflow_config)
 
       {:error, {:missing_workflow_file, path, reason}} ->
         Logger.error("Missing WORKFLOW.md at #{path}: #{inspect(reason)}")
-        state
+        record_poll_error(state, :missing_workflow_file)
 
       {:error, :workflow_front_matter_not_a_map} ->
         Logger.error("Failed to parse WORKFLOW.md: workflow front matter must decode to a map")
-        state
+        record_poll_error(state, :invalid_workflow_front_matter)
 
       {:error, {:workflow_parse_error, reason}} ->
         Logger.error("Failed to parse WORKFLOW.md: #{inspect(reason)}")
-        state
+        record_poll_error(state, :workflow_parse_error)
 
       {:error, reason} ->
         Logger.error("Failed to fetch from issue tracker: #{inspect(reason)}")
-        state
-
-      false ->
-        state
+        record_poll_error(state, :tracker_fetch_failed)
     end
   end
 
@@ -420,7 +478,7 @@ defmodule SymphonyElixir.Orchestrator do
   @spec spawn_issue_on_worker_host_for_test(term(), Issue.t(), term(), pid(), String.t() | nil) :: term()
   def spawn_issue_on_worker_host_for_test(%State{} = state, %Issue{} = issue, attempt, recipient, worker_host)
       when is_pid(recipient) do
-    spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+    legacy_spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
   end
 
   defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
@@ -816,13 +874,15 @@ defmodule SymphonyElixir.Orchestrator do
       last_codex_timestamp: Map.get(running_entry, :last_codex_timestamp)
     }
 
-    %{
+    state = %{
       state
       | running: Map.delete(state.running, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id),
         claimed: MapSet.put(state.claimed, issue_id),
         blocked: Map.put(state.blocked, issue_id, blocked_entry)
     }
+
+    persist_or_disable(state)
   end
 
   defp choose_issues(issues, state) do
@@ -984,7 +1044,13 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp do_dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
+  defp do_dispatch_issue(
+         %State{} = state,
+         issue,
+         attempt,
+         preferred_worker_host,
+         workspace_path \\ nil
+       ) do
     recipient = self()
 
     case select_worker_host(state, preferred_worker_host) do
@@ -993,15 +1059,162 @@ defmodule SymphonyElixir.Orchestrator do
         state
 
       worker_host ->
-        spawn_issue_on_worker_host(state, issue, attempt, recipient, worker_host)
+        spawn_issue_on_worker_host(
+          state,
+          issue,
+          attempt,
+          recipient,
+          worker_host,
+          workspace_path
+        )
     end
   end
 
-  defp spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
+  defp spawn_issue_on_worker_host(
+         %State{} = state,
+         issue,
+         attempt,
+         recipient,
+         worker_host,
+         workspace_path
+       ) do
+    harness = resolve_harness_for_issue(issue)
+    now = DateTime.utc_now()
+    budget = Map.get(state.budgets, issue.id, Budget.new(issue.id, issue.identifier, now))
+    limits = Budget.limits(Config.settings!().agent)
+
+    with nil <- Budget.exhausted_dimension(budget, limits, now),
+         {:ok, budget} <- Budget.authorize_attempt(budget, limits, now),
+         running_entry <- pending_running_entry(issue, worker_host, workspace_path, harness, attempt, budget, now),
+         pre_spawn_state <- put_running_claim(state, issue.id, running_entry, budget),
+         {:ok, persisted_state} <- persist(pre_spawn_state),
+         {:ok, pid} <- start_worker(persisted_state, issue, recipient, attempt, worker_host, workspace_path, harness) do
+      ref = Process.monitor(pid)
+
+      Logger.info("Dispatching issue to agent: #{issue_context(issue)} pid=#{inspect(pid)} attempt=#{inspect(attempt)} harness=#{harness} worker_host=#{worker_host || "local"}")
+
+      running_entry = %{running_entry | pid: pid, ref: ref}
+      %{persisted_state | running: Map.put(persisted_state.running, issue.id, running_entry)}
+    else
+      exhausted when exhausted in [:wall_time, :tokens, :abnormal_failures] ->
+        block_budget_exhausted(state, issue, budget, exhausted, harness, worker_host, workspace_path)
+
+      {:error, :attempts, exhausted_budget} ->
+        block_budget_exhausted(
+          state,
+          issue,
+          exhausted_budget,
+          :attempts,
+          harness,
+          worker_host,
+          workspace_path
+        )
+
+      {:error, %State{} = failed_state} ->
+        failed_state
+
+      {:error, reason} ->
+        handle_spawn_failure(state, issue, attempt, worker_host, workspace_path, reason)
+    end
+  end
+
+  defp start_worker(state, issue, recipient, attempt, worker_host, workspace_path, harness) do
+    runner = state.runner
+
+    Task.Supervisor.start_child(state.task_supervisor, fn ->
+      runner.(
+        issue,
+        recipient,
+        attempt: attempt,
+        worker_host: worker_host,
+        workspace_path: workspace_path,
+        harness: harness
+      )
+    end)
+  end
+
+  defp pending_running_entry(issue, worker_host, workspace_path, harness, attempt, budget, now) do
+    %{
+      pid: nil,
+      ref: nil,
+      identifier: issue.identifier,
+      issue: issue,
+      worker_host: worker_host,
+      harness: harness,
+      workspace_path: workspace_path,
+      session_id: nil,
+      last_codex_message: nil,
+      last_codex_timestamp: nil,
+      last_codex_event: nil,
+      codex_app_server_pid: nil,
+      codex_input_tokens: 0,
+      codex_output_tokens: 0,
+      codex_total_tokens: 0,
+      codex_last_reported_input_tokens: 0,
+      codex_last_reported_output_tokens: 0,
+      codex_last_reported_total_tokens: 0,
+      turn_count: 0,
+      retry_attempt: normalize_retry_attempt(attempt),
+      budget: budget,
+      started_at: now
+    }
+  end
+
+  defp put_running_claim(state, issue_id, running_entry, budget) do
+    %{
+      state
+      | running: Map.put(state.running, issue_id, running_entry),
+        claimed: MapSet.put(state.claimed, issue_id),
+        retry_attempts: Map.delete(state.retry_attempts, issue_id),
+        budgets: Map.put(state.budgets, issue_id, budget)
+    }
+  end
+
+  defp handle_spawn_failure(state, issue, attempt, worker_host, workspace_path, reason) do
+    Logger.error("Unable to spawn agent for #{issue_context(issue)}: #{inspect(reason)}")
+    next_attempt = if is_integer(attempt), do: attempt + 1, else: nil
+    state = %{state | running: Map.delete(state.running, issue.id), claimed: MapSet.put(state.claimed, issue.id)}
+
+    schedule_issue_retry(state, issue.id, next_attempt, %{
+      identifier: issue.identifier,
+      issue_url: issue.url,
+      error: "failed to spawn agent: #{inspect(reason)}",
+      worker_host: worker_host,
+      workspace_path: workspace_path
+    })
+  end
+
+  defp block_budget_exhausted(state, issue, budget, dimension, harness, worker_host, workspace_path) do
+    entry = %{
+      issue_id: issue.id,
+      identifier: issue.identifier,
+      issue: issue,
+      harness: harness,
+      worker_host: worker_host,
+      workspace_path: workspace_path,
+      budget: budget,
+      status: :budget_exhausted,
+      error: "budget exhausted: #{dimension}",
+      blocked_at: DateTime.utc_now()
+    }
+
+    state = %{
+      state
+      | running: Map.delete(state.running, issue.id),
+        retry_attempts: Map.delete(state.retry_attempts, issue.id),
+        claimed: MapSet.put(state.claimed, issue.id),
+        blocked: Map.put(state.blocked, issue.id, entry),
+        budgets: Map.put(state.budgets, issue.id, budget)
+    }
+
+    persist_or_disable(state)
+  end
+
+  defp legacy_spawn_issue_on_worker_host(%State{} = state, issue, attempt, recipient, worker_host) do
     harness = resolve_harness_for_issue(issue)
 
     case Task.Supervisor.start_child(state.task_supervisor, fn ->
-           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host, harness: harness)
+           AgentRunner.run(issue, recipient, attempt: attempt, worker_host: worker_host, harness: resolve_harness_for_issue(issue))
          end) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
@@ -1079,11 +1292,13 @@ defmodule SymphonyElixir.Orchestrator do
   defp revalidate_issue_for_dispatch(issue, _issue_fetcher, _terminal_states), do: {:ok, issue}
 
   defp complete_issue(%State{} = state, issue_id) do
-    %{
+    state = %{
       state
       | completed: MapSet.put(state.completed, issue_id),
         retry_attempts: Map.delete(state.retry_attempts, issue_id)
     }
+
+    persist_or_disable(state)
   end
 
   defp schedule_issue_retry(%State{} = state, issue_id, attempt, metadata)
@@ -1094,6 +1309,7 @@ defmodule SymphonyElixir.Orchestrator do
     old_timer = Map.get(previous_retry, :timer_ref)
     retry_token = make_ref()
     due_at_ms = System.monotonic_time(:millisecond) + delay_ms
+    due_at = DateTime.add(DateTime.utc_now(), delay_ms, :millisecond)
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     issue_url = pick_retry_issue_url(previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
@@ -1118,6 +1334,7 @@ defmodule SymphonyElixir.Orchestrator do
             timer_ref: timer_ref,
             retry_token: retry_token,
             due_at_ms: due_at_ms,
+            due_at: due_at,
             identifier: identifier,
             issue_url: issue_url,
             error: error,
@@ -1125,6 +1342,7 @@ defmodule SymphonyElixir.Orchestrator do
             workspace_path: workspace_path
           })
     }
+    |> persist_or_disable()
   end
 
   defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
@@ -1239,7 +1457,14 @@ defmodule SymphonyElixir.Orchestrator do
          worker_slots_available?(state, metadata[:worker_host]) do
       case refresh_issue_for_dispatch(issue) do
         {:ok, %Issue{} = refreshed_issue} ->
-          {:noreply, do_dispatch_issue(state, refreshed_issue, attempt, metadata[:worker_host])}
+          {:noreply,
+           do_dispatch_issue(
+             state,
+             refreshed_issue,
+             attempt,
+             metadata[:worker_host],
+             metadata[:workspace_path]
+           )}
 
         {:skip, :missing} ->
           {:noreply, release_issue_claim(state, issue.id)}
@@ -1276,12 +1501,15 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp release_issue_claim(%State{} = state, issue_id) do
-    %{
+    state = %{
       state
       | claimed: MapSet.delete(state.claimed, issue_id),
         blocked: Map.delete(state.blocked, issue_id),
-        retry_attempts: Map.delete(state.retry_attempts, issue_id)
+        retry_attempts: Map.delete(state.retry_attempts, issue_id),
+        budgets: Map.delete(state.budgets, issue_id)
     }
+
+    persist_or_disable(state)
   end
 
   defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
@@ -1443,6 +1671,24 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @spec health(GenServer.server()) :: map() | :unavailable
+  def health(server \\ __MODULE__) do
+    try do
+      GenServer.call(server, :health, 5_000)
+    catch
+      :exit, _reason -> :unavailable
+    end
+  end
+
+  @spec drain(GenServer.server(), non_neg_integer()) :: :ok | :unavailable
+  def drain(server \\ __MODULE__, timeout_ms) when is_integer(timeout_ms) and timeout_ms >= 0 do
+    try do
+      GenServer.call(server, {:drain, timeout_ms}, 5_000)
+    catch
+      :exit, _reason -> :unavailable
+    end
+  end
+
   @spec snapshot() :: map() | :timeout | :unavailable
   def snapshot, do: snapshot(__MODULE__, 15_000)
 
@@ -1461,6 +1707,43 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @impl true
+  def handle_call(:health, _from, state) do
+    persistence = if state.persistence_error, do: {:error, state.persistence_error}, else: :ok
+    tracker_ready = not is_nil(state.last_tracker_poll_success_at) and is_nil(state.last_tracker_poll_error)
+
+    {:reply,
+     %{
+       ready?: persistence == :ok and tracker_ready and state.dispatch_enabled and not state.draining,
+       persistence: persistence,
+       dispatch_enabled: state.dispatch_enabled,
+       draining: state.draining,
+       last_tracker_poll_success_at: state.last_tracker_poll_success_at,
+       last_tracker_poll_error: state.last_tracker_poll_error
+     }, state}
+  end
+
+  def handle_call({:drain, timeout_ms}, _from, state) do
+    cancel_tick_timer(state.tick_timer_ref)
+
+    state = %{
+      state
+      | draining: true,
+        dispatch_enabled: false,
+        poll_check_in_progress: false,
+        tick_timer_ref: nil,
+        tick_token: nil,
+        next_poll_due_at_ms: nil
+    }
+
+    state = persist_or_disable(state)
+
+    if map_size(state.running) > 0 do
+      Process.send_after(self(), :drain_deadline, timeout_ms)
+    end
+
+    {:reply, :ok, state}
+  end
+
   def handle_call(:snapshot, _from, state) do
     state = refresh_runtime_config(state)
     now = DateTime.utc_now()
@@ -1658,6 +1941,274 @@ defmodule SymphonyElixir.Orchestrator do
         tick_token: tick_token,
         next_poll_due_at_ms: System.monotonic_time(:millisecond) + delay_ms
     }
+  end
+
+  defp cancel_tick_timer(timer_ref) when is_reference(timer_ref), do: Process.cancel_timer(timer_ref)
+  defp cancel_tick_timer(_timer_ref), do: false
+
+  defp state_persistence_enabled?(%State{state_path: path}) when is_binary(path),
+    do: String.trim(path) != ""
+
+  defp state_persistence_enabled?(_state), do: false
+
+  defp persist(%State{} = state) do
+    if state_persistence_enabled?(state) do
+      snapshot = RuntimeState.from_orchestrator(state, DateTime.utc_now())
+
+      case state.state_store.save(state.state_path, snapshot) do
+        :ok ->
+          {:ok,
+           %{
+             state
+             | persistence_error: nil,
+               last_checkpoint_at_ms: System.monotonic_time(:millisecond)
+           }}
+
+        {:error, reason} ->
+          {:error, disable_dispatch(state, reason)}
+      end
+    else
+      {:ok, state}
+    end
+  end
+
+  defp persist_or_disable(%State{} = state) do
+    case persist(state) do
+      {:ok, persisted} -> persisted
+      {:error, failed} -> failed
+    end
+  end
+
+  defp disable_dispatch(%State{} = state, reason) do
+    cancel_tick_timer(state.tick_timer_ref)
+
+    Logger.error("Durable state checkpoint failed; disabling dispatch: #{inspect(reason)}")
+
+    %{
+      state
+      | dispatch_enabled: false,
+        persistence_error: reason,
+        poll_check_in_progress: false,
+        tick_timer_ref: nil,
+        tick_token: nil,
+        next_poll_due_at_ms: nil
+    }
+  end
+
+  defp record_poll_error(%State{} = state, code) do
+    state
+    |> Map.put(:last_tracker_poll_error, code)
+    |> persist_or_disable()
+  end
+
+  defp maybe_persist_telemetry(%State{} = state, %{event: event})
+       when event in [:turn_completed, :turn_failed, :session_completed] do
+    persist_or_disable(state)
+  end
+
+  defp maybe_persist_telemetry(%State{} = state, _update) do
+    now_ms = System.monotonic_time(:millisecond)
+
+    if is_nil(state.last_checkpoint_at_ms) or now_ms - state.last_checkpoint_at_ms >= 1_000 do
+      persist_or_disable(state)
+    else
+      state
+    end
+  end
+
+  defp update_issue_budget(%State{} = state, issue_id, update, token_delta) do
+    case Map.get(state.budgets, issue_id) do
+      %Budget{} = budget ->
+        budget =
+          budget
+          |> Budget.add_tokens(token_delta.input_tokens, token_delta.output_tokens, update.timestamp)
+          |> maybe_authorize_completed_turn(update)
+
+        %{state | budgets: Map.put(state.budgets, issue_id, budget)}
+
+      _ ->
+        state
+    end
+  end
+
+  defp maybe_authorize_completed_turn(%Budget{} = budget, %{event: :turn_completed, timestamp: now}) do
+    case Budget.authorize_turn(budget, Budget.limits(Config.settings!().agent), now) do
+      {:ok, updated} -> updated
+      {:error, _dimension, unchanged} -> unchanged
+    end
+  end
+
+  defp maybe_authorize_completed_turn(%Budget{} = budget, _update), do: budget
+
+  defp record_budget_completion(%State{} = state, issue_id, reason) do
+    case Map.get(state.budgets, issue_id) do
+      %Budget{} = budget ->
+        now = DateTime.utc_now()
+
+        budget =
+          if reason == :normal do
+            Budget.record_normal_completion(budget, now)
+          else
+            Budget.record_abnormal_failure(budget, now)
+          end
+
+        %{state | budgets: Map.put(state.budgets, issue_id, budget)}
+
+      _ ->
+        state
+    end
+  end
+
+  defp restore_runtime_state(%State{} = state) do
+    if state_persistence_enabled?(state) do
+      case state.state_store.load(state.state_path) do
+        {:ok, nil} ->
+          persist_or_disable(state)
+
+        {:ok, snapshot} ->
+          restore_snapshot(state, snapshot)
+
+        {:error, reason} ->
+          disable_dispatch(state, reason)
+      end
+    else
+      state
+    end
+  end
+
+  defp restore_snapshot(%State{} = state, snapshot) do
+    claims = Map.get(snapshot, "claims", %{})
+
+    {retry_attempts, blocked, claimed, budgets} =
+      Enum.reduce(claims, {%{}, %{}, MapSet.new(), %{}}, fn {issue_id, claim}, {retries, blocks, ids, budgets} ->
+        budget = restored_budget(claim, issue_id)
+
+        case claim["status"] do
+          status when status in ["running", "retrying", "interrupted"] ->
+            retry = restored_retry(claim)
+            {Map.put(retries, issue_id, retry), blocks, MapSet.put(ids, issue_id), maybe_put_budget(budgets, issue_id, budget)}
+
+          _blocked_status ->
+            block = restored_block(claim, budget)
+            {retries, Map.put(blocks, issue_id, block), MapSet.put(ids, issue_id), maybe_put_budget(budgets, issue_id, budget)}
+        end
+      end)
+
+    state = %{
+      state
+      | retry_attempts: retry_attempts,
+        blocked: blocked,
+        claimed: claimed,
+        budgets: budgets,
+        completed: Map.get(snapshot, "completed", []) |> MapSet.new(),
+        last_tracker_poll_success_at: parse_datetime(get_in(snapshot, ["poll", "last_success_at"])),
+        last_tracker_poll_error: get_in(snapshot, ["poll", "last_error"]),
+        draining: false
+    }
+
+    persist_or_disable(state)
+  end
+
+  defp schedule_recovered_claims(%State{dispatch_enabled: false} = state), do: state
+
+  defp schedule_recovered_claims(%State{} = state) do
+    retry_attempts =
+      Enum.reduce(state.retry_attempts, %{}, fn {issue_id, entry}, acc ->
+        retry_token = make_ref()
+        timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, state.recovery_backoff_ms)
+
+        Map.put(acc, issue_id, %{
+          entry
+          | retry_token: retry_token,
+            timer_ref: timer_ref,
+            due_at_ms: System.monotonic_time(:millisecond) + state.recovery_backoff_ms,
+            due_at: DateTime.add(DateTime.utc_now(), state.recovery_backoff_ms, :millisecond)
+        })
+      end)
+
+    %{state | retry_attempts: retry_attempts}
+  end
+
+  defp restored_retry(claim) do
+    %{
+      attempt: max(1, claim["retry_attempt"] || 1),
+      identifier: claim["identifier"],
+      issue_url: get_in(claim, ["issue", "url"]),
+      error: "interrupted by previous shutdown",
+      worker_host: claim["worker_host"],
+      workspace_path: claim["workspace_path"],
+      timer_ref: nil,
+      retry_token: nil,
+      due_at_ms: nil,
+      due_at: nil
+    }
+  end
+
+  defp restored_block(claim, budget) do
+    %{
+      identifier: claim["identifier"],
+      issue: issue_from_map(claim["issue"]),
+      harness: claim["harness"] || "codex",
+      worker_host: claim["worker_host"],
+      workspace_path: claim["workspace_path"],
+      session_id: claim["session_id"],
+      error: claim["last_error"] || "restored blocked claim",
+      budget: budget,
+      blocked_at: DateTime.utc_now()
+    }
+  end
+
+  defp restored_budget(%{"budget" => budget}, _issue_id) when is_map(budget) do
+    case Budget.from_map(budget) do
+      {:ok, restored} -> restored
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp restored_budget(claim, issue_id) do
+    identifier = claim["identifier"] || issue_id
+    Budget.new(issue_id, identifier, DateTime.utc_now())
+  end
+
+  defp maybe_put_budget(budgets, _issue_id, nil), do: budgets
+  defp maybe_put_budget(budgets, issue_id, budget), do: Map.put(budgets, issue_id, budget)
+
+  defp issue_from_map(issue) when is_map(issue) do
+    %Issue{
+      id: issue["id"],
+      identifier: issue["identifier"],
+      title: issue["title"],
+      description: issue["description"],
+      priority: issue["priority"],
+      state: issue["state"],
+      branch_name: issue["branch_name"],
+      url: issue["url"],
+      assignee_id: issue["assignee_id"],
+      labels: issue["labels"] || [],
+      blocked_by: issue["blocked_by"] || [],
+      dispatchable: true,
+      created_at: parse_datetime(issue["created_at"]),
+      updated_at: parse_datetime(issue["updated_at"])
+    }
+  end
+
+  defp issue_from_map(_issue), do: nil
+
+  defp parse_datetime(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> datetime
+      _ -> nil
+    end
+  end
+
+  defp parse_datetime(_value), do: nil
+
+  defp stop_all_running_tasks(%State{} = state) do
+    Enum.each(state.running, fn {_issue_id, entry} ->
+      stop_running_task(Map.get(entry, :pid), Map.get(entry, :ref), state.task_supervisor)
+    end)
+
+    %{state | running: %{}}
   end
 
   defp schedule_poll_cycle_start do

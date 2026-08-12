@@ -26,6 +26,10 @@ defmodule SymphonyElixir.AgentRuntimeSupervisor do
       Supervisor.child_spec(
         {SymphonyElixir.Orchestrator, name: orchestrator_name, task_supervisor: task_supervisor_name},
         id: orchestrator_name
+      ),
+      Supervisor.child_spec(
+        {SymphonyElixir.SignalHandler, orchestrator: orchestrator_name},
+        id: SymphonyElixir.SignalHandler
       )
     ]
 
