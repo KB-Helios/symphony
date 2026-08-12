@@ -3,7 +3,7 @@ defmodule SymphonyElixir.ChildEnvironment do
   Builds the explicit environment inherited by local and remote harness children.
   """
 
-  @base ~w(HOME PATH LANG LC_ALL TERM TMPDIR SSL_CERT_FILE SSL_CERT_DIR SSH_AUTH_SOCK GIT_SSH_COMMAND)
+  @base ~w(HOME PATH LANG LC_ALL TERM TMPDIR SSL_CERT_FILE SSL_CERT_DIR SSH_AUTH_SOCK GIT_SSH_COMMAND MIX_HOME HEX_HOME REBAR_CACHE_DIR)
   @codex @base ++ ~w(CODEX_HOME OMNIROUTE_BASE_URL OMNIROUTE_API_KEY SYMPHONY_MODEL)
   @prime @base
   @valid_name ~r/^[A-Za-z_][A-Za-z0-9_]*$/

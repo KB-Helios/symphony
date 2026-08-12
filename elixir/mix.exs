@@ -118,7 +118,7 @@ defmodule SymphonyElixir.MixProject do
   defp releases do
     [
       symphony: [
-        steps: [:assemble, &Burrito.wrap/1],
+        steps: release_steps(),
         burrito: [
           targets: [
             macos_arm64: [os: :darwin, cpu: :aarch64],
@@ -129,5 +129,13 @@ defmodule SymphonyElixir.MixProject do
         ]
       ]
     ]
+  end
+
+  defp release_steps do
+    if System.get_env("BURRITO_BUILD") == "1" do
+      [:assemble, &Burrito.wrap/1]
+    else
+      [:assemble]
+    end
   end
 end

@@ -18,16 +18,17 @@ tracker:
     - Done
 polling:
   interval_ms: 5000
+server:
+  host: 0.0.0.0
+  port: 4021
 workspace:
-  root: ~/code/symphony-workspaces
+  root: /var/lib/symphony/workspaces
 hooks:
   after_create: |
     git clone --depth 1 https://github.com/openai/symphony .
-    if command -v mise >/dev/null 2>&1; then
-      cd elixir && mise trust && mise exec -- mix deps.get
-    fi
+    cd elixir && mix deps.get
   before_remove: |
-    cd elixir && mise exec -- mix workspace.before_remove
+    cd elixir && mix workspace.before_remove
 agent:
   max_concurrent_agents: 1
   max_turns: 20

@@ -1,0 +1,7 @@
+.git
+.worktrees
+elixir/_build
+elixir/deps
+elixir/cover
+elixir/log
+**/.DS_Store
