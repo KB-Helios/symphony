@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 : "${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}"
 : "${LINEAR_API_KEY:?LINEAR_API_KEY is required}"

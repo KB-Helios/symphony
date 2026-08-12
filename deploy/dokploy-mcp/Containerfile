@@ -1,0 +1,11 @@
+FROM node:22-alpine
+
+ARG DOKPLOY_MCP_VERSION=0.29.3
+RUN npm install --global "@dokploy/mcp@${DOKPLOY_MCP_VERSION}" \
+    && npm cache clean --force
+
+ENV MCP_TRANSPORT=http
+USER node
+EXPOSE 3000
+ENTRYPOINT ["dokploy-mcp"]
+CMD ["--http"]

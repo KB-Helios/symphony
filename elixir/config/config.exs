@@ -23,7 +23,8 @@ if config_env() == :test do
   config :symphony_elixir,
     workflow_file_path: Path.expand("../test/fixtures/startup_workflow.md", __DIR__),
     install_signal_handler: false,
-    allow_test_child_environment: true
+    allow_test_child_environment: true,
+    model_router_check: fn -> :ok end
 end
 
 # tailwind hex package is 0.5.1 (mix.lock) but wraps Tailwind CLI 4.1.12 — keep version as CLI version.

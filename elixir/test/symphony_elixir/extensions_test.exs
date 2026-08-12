@@ -57,6 +57,33 @@ defmodule SymphonyElixir.ExtensionsTest do
     def handle_call(:request_refresh, _from, state) do
       {:reply, Keyword.get(state, :refresh, :unavailable), state}
     end
+
+    def handle_call(:health, _from, state) do
+      {:reply, Keyword.fetch!(state, :health), state}
+    end
+  end
+
+  test "readiness reports a private model router outage" do
+    orchestrator_name = Module.concat(__MODULE__, :RouterUnavailableOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: %{},
+        health: %{
+          ready?: false,
+          persistence: :ok,
+          draining: false,
+          last_tracker_poll_success_at: DateTime.utc_now(),
+          last_tracker_poll_error: nil,
+          model_router: {:error, :router_unreachable}
+        }
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name)
+
+    payload = json_response(get(build_conn(), "/api/v1/ready"), 503)
+    assert payload["error"]["code"] == "model_router_unavailable"
   end
 
   setup do

@@ -28,8 +28,11 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
       %{last_tracker_poll_success_at: nil} ->
         readiness_error(conn, "tracker_not_ready")
 
-      %{last_tracker_poll_error: _reason} ->
+      %{last_tracker_poll_error: reason} when not is_nil(reason) ->
         readiness_error(conn, "tracker_unavailable")
+
+      %{model_router: {:error, _reason}} ->
+        readiness_error(conn, "model_router_unavailable")
 
       _ ->
         readiness_error(conn, "orchestrator_unavailable")

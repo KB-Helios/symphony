@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 target=${1:?config path is required}
 : "${OMNIROUTE_BASE_URL:?OMNIROUTE_BASE_URL is required}"
 : "${SYMPHONY_MODEL:?SYMPHONY_MODEL is required}"
 
 case "$OMNIROUTE_BASE_URL" in
-  https://*) ;;
-  *) echo "OMNIROUTE_BASE_URL must use https" >&2; exit 64 ;;
+  https://*/v1) ;;
+  *) echo "OMNIROUTE_BASE_URL must be an https URL ending in /v1" >&2; exit 64 ;;
+esac
+
+if [[ "$OMNIROUTE_BASE_URL" =~ [[:space:][:cntrl:]] ]]; then
+  echo "OMNIROUTE_BASE_URL contains whitespace or control characters" >&2
+  exit 64
+fi
+
+case "$SYMPHONY_MODEL" in
+  ""|*$'\r'*|*$'\n'*) echo "SYMPHONY_MODEL must be one non-empty line" >&2; exit 64 ;;
 esac
 
 toml_escape() {
@@ -25,7 +35,7 @@ model_provider = "omniroute"
 model = "$(toml_escape "$SYMPHONY_MODEL")"
 
 [model_providers.omniroute]
-name = "OmniRoute"
+name = "Private OmniRoute"
 base_url = "$(toml_escape "$OMNIROUTE_BASE_URL")"
 env_key = "OMNIROUTE_API_KEY"
 wire_api = "responses"

@@ -123,6 +123,29 @@ defmodule SymphonyElixir.OrchestratorResilienceTest do
     stop_orchestrator(pid)
   end
 
+  test "model router outage prevents dispatch and readiness", %{state_path: state_path} do
+    issue = issue("issue-router-down", "SYM-ROUTER-DOWN")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    parent = self()
+    runner = fn started_issue, _recipient, _opts -> send(parent, {:started, started_issue.id}) end
+
+    pid =
+      start_orchestrator!(
+        state_path: state_path,
+        router_check: fn -> {:error, :router_unreachable} end,
+        runner: runner
+      )
+
+    refute_receive {:started, _}, 250
+
+    assert %{
+             ready?: false,
+             model_router: {:error, :router_unreachable}
+           } = Orchestrator.health(pid)
+
+    stop_orchestrator(pid)
+  end
+
   test "drain persists the non-ready state and stops future polling", %{state_path: state_path} do
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
     pid = start_orchestrator!(state_path: state_path)

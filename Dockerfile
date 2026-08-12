@@ -41,7 +41,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /opt/mix /var/lib/symphony/state /var/lib/symphony/workspaces /var/lib/symphony/codex \
     && MIX_HOME=/opt/mix mix local.hex --force \
-    && MIX_HOME=/opt/mix mix local.rebar --force
+    && MIX_HOME=/opt/mix mix local.rebar --force \
+    && groupadd --gid 10001 symphony \
+    && useradd --uid 10001 --gid 10001 --home-dir /var/lib/symphony --shell /usr/sbin/nologin symphony \
+    && chown -R 10001:10001 /var/lib/symphony
 
 COPY --from=codex /usr/local/bin/node /usr/local/bin/node
 COPY --from=codex /usr/local/bin/codex /usr/local/bin/codex
@@ -52,4 +55,6 @@ COPY deploy/dokploy /app/deploy/dokploy
 
 WORKDIR /app
 EXPOSE 4021
+VOLUME ["/var/lib/symphony/state", "/var/lib/symphony/workspaces", "/var/lib/symphony/codex"]
+USER 10001:10001
 ENTRYPOINT ["/app/deploy/dokploy/entrypoint.sh"]

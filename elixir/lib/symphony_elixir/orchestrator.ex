@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Budget, Config, RuntimeState, StateStore, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Budget, Config, ModelRouter, RuntimeState, StateStore, StatusDashboard, Tracker, Workspace}
   alias SymphonyElixir.Tracker.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -36,9 +36,12 @@ defmodule SymphonyElixir.Orchestrator do
       :state_path,
       :state_store,
       :runner,
+      :router_check,
       :recovery_backoff_ms,
       :last_tracker_poll_success_at,
       :last_tracker_poll_error,
+      :last_model_router_success_at,
+      :last_model_router_error,
       :persistence_error,
       :last_checkpoint_at_ms,
       task_supervisor: SymphonyElixir.TaskSupervisor,
@@ -84,6 +87,12 @@ defmodule SymphonyElixir.Orchestrator do
             ),
           state_store: Keyword.get(opts, :state_store, StateStore),
           runner: Keyword.get(opts, :runner, &AgentRunner.run/3),
+          router_check:
+            Keyword.get(
+              opts,
+              :router_check,
+              Application.get_env(:symphony_elixir, :model_router_check, &ModelRouter.check/0)
+            ),
           recovery_backoff_ms: Keyword.get(opts, :recovery_backoff_ms, config.runtime.recovery_backoff_ms),
           codex_totals: @empty_codex_totals,
           codex_rate_limits: nil
@@ -314,6 +323,20 @@ defmodule SymphonyElixir.Orchestrator do
       |> reconcile_running_issues()
       |> reconcile_blocked_issues()
 
+    case state.router_check.() do
+      :ok ->
+        state
+        |> Map.put(:last_model_router_success_at, DateTime.utc_now())
+        |> Map.put(:last_model_router_error, nil)
+        |> maybe_dispatch_with_tracker()
+
+      {:error, reason} ->
+        Logger.error("Private model router readiness failed: #{inspect(reason)}")
+        %{state | last_model_router_error: reason}
+    end
+  end
+
+  defp maybe_dispatch_with_tracker(%State{} = state) do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_issues_by_states(Config.settings!().tracker.active_states) do
       state =
@@ -1710,11 +1733,16 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_call(:health, _from, state) do
     persistence = if state.persistence_error, do: {:error, state.persistence_error}, else: :ok
     tracker_ready = not is_nil(state.last_tracker_poll_success_at) and is_nil(state.last_tracker_poll_error)
+    model_router = if state.last_model_router_error, do: {:error, state.last_model_router_error}, else: :ok
+    model_router_ready = not is_nil(state.last_model_router_success_at) and model_router == :ok
 
     {:reply,
      %{
-       ready?: persistence == :ok and tracker_ready and state.dispatch_enabled and not state.draining,
+       ready?:
+         persistence == :ok and tracker_ready and model_router_ready and state.dispatch_enabled and
+           not state.draining,
        persistence: persistence,
+       model_router: model_router,
        dispatch_enabled: state.dispatch_enabled,
        draining: state.draining,
        last_tracker_poll_success_at: state.last_tracker_poll_success_at,
