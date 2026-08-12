@@ -40,7 +40,7 @@ runtime:
   graceful_drain_timeout_ms: 120000
   recovery_backoff_ms: 30000
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  command: codex --model "$SYMPHONY_MODEL" --config model_provider=omniroute app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:
