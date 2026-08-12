@@ -14,11 +14,12 @@ defmodule SymphonyElixir.DokployMcpPackagingTest do
     assert env =~ "DOKPLOY_API_KEY="
     refute Regex.match?(~r/^DOKPLOY_API_KEY=.+$/m, env)
 
-    assert unit =~ "PublishPort=127.0.0.1:3001:3000"
+    assert unit =~ "PublishPort=127.0.0.1:3003:3000"
+    refute unit =~ "PublishPort=127.0.0.1:3001:3000"
     assert unit =~ "DropCapability=all"
     assert unit =~ "ReadOnly=true"
 
-    assert codex =~ "url = \"https://ai-router-main.tail31b2b0.ts.net:3001/mcp\""
+    assert codex =~ "url = \"https://ai-router-main.tail31b2b0.ts.net:3003/mcp\""
     assert codex =~ "default_tools_approval_mode = \"writes\""
   end
 end

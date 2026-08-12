@@ -38,9 +38,9 @@ systemctl --user daemon-reload
 systemctl --user enable --now dokploy-mcp.service
 
 if sudo -n true 2>/dev/null; then
-  sudo tailscale serve --bg --yes --https=3001 http://127.0.0.1:3001
+  sudo tailscale serve --bg --yes --https=3003 http://127.0.0.1:3003
 else
   echo "service is active on loopback; an operator must publish it once with:" >&2
-  echo "sudo tailscale serve --bg --yes --https=3001 http://127.0.0.1:3001" >&2
+  echo "sudo tailscale serve --bg --yes --https=3003 http://127.0.0.1:3003" >&2
   exit 77
 fi

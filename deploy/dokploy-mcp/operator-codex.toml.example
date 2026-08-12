@@ -1,5 +1,5 @@
 [mcp_servers.dokploy]
-url = "https://ai-router-main.tail31b2b0.ts.net:3001/mcp"
+url = "https://ai-router-main.tail31b2b0.ts.net:3003/mcp"
 default_tools_approval_mode = "writes"
 startup_timeout_sec = 20
 tool_timeout_sec = 60
