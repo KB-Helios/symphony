@@ -67,14 +67,16 @@ function Get-BootDiskIdentity {
     $diskName = ($diskNameOutput | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($diskName)) { throw "Target VM has no boot disk" }
 
-    $json = Invoke-Rtk -Arguments @(
+    $diskIdOutput = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "disks", "describe", $diskName,
-        "--zone", $Zone, "--project", $Project, "--format=json(id,selfLink)"
+        "--zone", $Zone, "--project", $Project, "--format=value(id)"
     )
-    $disk = $json | ConvertFrom-Json
+    $diskId = ($diskIdOutput | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($diskId)) { throw "Target boot disk has no immutable ID" }
+
     return [pscustomobject]@{
-        Source = [string]$disk.selfLink
-        Id = [string]$disk.id
+        Source = $diskName
+        Id = $diskId
     }
 }
 
@@ -177,7 +179,7 @@ function Assert-RollbackPrepared {
     $vm = Get-TargetInstance
     $bootDisk = Get-BootDiskIdentity
     if ($proof.bootDiskSource -ne $bootDisk.Source -or [string]$proof.bootDiskId -ne $bootDisk.Id) {
-        throw "Rollback proof boot disk no longer matches the target VM"
+        throw "Rollback proof boot disk name or immutable ID no longer matches the target VM"
     }
 
     $status = Invoke-Rtk -Arguments @(
