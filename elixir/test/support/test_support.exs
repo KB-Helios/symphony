@@ -110,7 +110,14 @@ defmodule SymphonyElixir.TestSupport do
           max_concurrent_agents: 10,
           max_turns: 20,
           max_retry_backoff_ms: 300_000,
+          max_attempts_per_issue: 10,
+          max_total_turns_per_issue: 100,
+          max_wall_time_ms_per_issue: 14_400_000,
+          max_total_tokens_per_issue: 2_000_000,
+          max_consecutive_abnormal_failures: 5,
           max_concurrent_agents_by_state: %{},
+          graceful_drain_timeout_ms: 120_000,
+          recovery_backoff_ms: 30_000,
           codex_command: "codex app-server",
           codex_approval_policy: %{
             granular: %{
@@ -160,7 +167,14 @@ defmodule SymphonyElixir.TestSupport do
     max_concurrent_agents = Keyword.get(config, :max_concurrent_agents)
     max_turns = Keyword.get(config, :max_turns)
     max_retry_backoff_ms = Keyword.get(config, :max_retry_backoff_ms)
+    max_attempts_per_issue = Keyword.get(config, :max_attempts_per_issue)
+    max_total_turns_per_issue = Keyword.get(config, :max_total_turns_per_issue)
+    max_wall_time_ms_per_issue = Keyword.get(config, :max_wall_time_ms_per_issue)
+    max_total_tokens_per_issue = Keyword.get(config, :max_total_tokens_per_issue)
+    max_consecutive_abnormal_failures = Keyword.get(config, :max_consecutive_abnormal_failures)
     max_concurrent_agents_by_state = Keyword.get(config, :max_concurrent_agents_by_state)
+    graceful_drain_timeout_ms = Keyword.get(config, :graceful_drain_timeout_ms)
+    recovery_backoff_ms = Keyword.get(config, :recovery_backoff_ms)
     codex_command = Keyword.get(config, :codex_command)
     codex_approval_policy = Keyword.get(config, :codex_approval_policy)
     codex_thread_sandbox = Keyword.get(config, :codex_thread_sandbox)
@@ -202,7 +216,15 @@ defmodule SymphonyElixir.TestSupport do
         "  max_concurrent_agents: #{yaml_value(max_concurrent_agents)}",
         "  max_turns: #{yaml_value(max_turns)}",
         "  max_retry_backoff_ms: #{yaml_value(max_retry_backoff_ms)}",
+        "  max_attempts_per_issue: #{yaml_value(max_attempts_per_issue)}",
+        "  max_total_turns_per_issue: #{yaml_value(max_total_turns_per_issue)}",
+        "  max_wall_time_ms_per_issue: #{yaml_value(max_wall_time_ms_per_issue)}",
+        "  max_total_tokens_per_issue: #{yaml_value(max_total_tokens_per_issue)}",
+        "  max_consecutive_abnormal_failures: #{yaml_value(max_consecutive_abnormal_failures)}",
         "  max_concurrent_agents_by_state: #{yaml_value(max_concurrent_agents_by_state)}",
+        "runtime:",
+        "  graceful_drain_timeout_ms: #{yaml_value(graceful_drain_timeout_ms)}",
+        "  recovery_backoff_ms: #{yaml_value(recovery_backoff_ms)}",
         "codex:",
         "  command: #{yaml_value(codex_command)}",
         "  approval_policy: #{yaml_value(codex_approval_policy)}",
