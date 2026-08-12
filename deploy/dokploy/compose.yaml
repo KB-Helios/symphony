@@ -56,7 +56,7 @@ services:
     pids_limit: 512
     cap_drop:
       - ALL
-    stop_grace_period: 2m
+    stop_grace_period: 150s
     healthcheck:
       test: [CMD, curl, --fail, --silent, --show-error, http://127.0.0.1:4021/api/v1/health]
       interval: 15s

@@ -47,8 +47,8 @@ RUN apt-get update \
     && chown -R 10001:10001 /var/lib/symphony
 
 COPY --from=codex /usr/local/bin/node /usr/local/bin/node
-COPY --from=codex /usr/local/bin/codex /usr/local/bin/codex
 COPY --from=codex /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex
 COPY --from=build /src/elixir/_build/prod/rel/symphony /app
 COPY elixir/WORKFLOW.md /app/WORKFLOW.md
 COPY deploy/dokploy /app/deploy/dokploy

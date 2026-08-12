@@ -20,6 +20,6 @@ install -d -m 700 \
 
 /app/deploy/dokploy/render-codex-config.sh "$CODEX_HOME/config.toml"
 
-exec flock --exclusive --nonblock \
+exec flock --no-fork --exclusive --nonblock \
   /var/lib/symphony/state/controller.lock \
   /app/bin/symphony start

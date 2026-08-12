@@ -57,6 +57,24 @@ defmodule SymphonyElixir.WorkspaceSafetyHardeningGapTest do
     refute source =~ "\"  cd \\\"$workspace\\\"\","
   end
 
+  test "recorded local workspace cleanup cannot escape the configured root" do
+    root = Path.join(System.tmp_dir!(), "symphony-recorded-root-#{System.unique_integer([:positive])}")
+    outside = Path.join(System.tmp_dir!(), "symphony-recorded-outside-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.mkdir_p!(outside)
+    File.write!(Path.join(outside, "keep"), "safe")
+
+    on_exit(fn ->
+      File.rm_rf(root)
+      File.rm_rf(outside)
+    end)
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory", workspace_root: root)
+
+    assert {:error, {:workspace_outside_root, _, _}, ""} = Workspace.remove_recorded(outside, nil)
+    assert File.read!(Path.join(outside, "keep")) == "safe"
+  end
+
   defp workspace_source do
     candidates = [
       Path.join([File.cwd!(), "lib", "symphony_elixir", "workspace.ex"]),

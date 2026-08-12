@@ -91,11 +91,14 @@ defmodule SymphonyElixir.Budget do
   end
 
   @spec exhausted_dimension(t(), map(), DateTime.t()) ::
-          :wall_time | :tokens | :abnormal_failures | nil
+          :wall_time | :turns | :tokens | :abnormal_failures | nil
   def exhausted_dimension(%__MODULE__{} = budget, limits, %DateTime{} = now) do
     cond do
       DateTime.diff(now, budget.first_activity_at, :millisecond) >= limits.wall_time_ms ->
         :wall_time
+
+      budget.total_turns >= limits.turns ->
+        :turns
 
       budget.input_tokens + budget.output_tokens >= limits.tokens ->
         :tokens

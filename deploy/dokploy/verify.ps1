@@ -6,11 +6,25 @@ param(
     [string]$SymphonyUrl = "http://symphony-prod:4021",
     [string]$OmniRouteUrl = "https://ai-router-main.tail31b2b0.ts.net/v1",
     [string]$OmniRouteApiKey = $env:OMNIROUTE_API_KEY,
-    [string]$Model = $env:SYMPHONY_MODEL
+    [string]$Model = $env:SYMPHONY_MODEL,
+    [string]$DokployUrl = $env:DOKPLOY_URL,
+    [string]$DokployApiKey = $env:DOKPLOY_API_KEY,
+    [string]$ComposeId = $env:DOKPLOY_COMPOSE_ID
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$DeploymentMarker = Join-Path $PSScriptRoot ".deployment.json"
+
+if ([string]::IsNullOrWhiteSpace($ComposeId) -and (Test-Path -LiteralPath $DeploymentMarker -PathType Leaf)) {
+    $ComposeId = [string](Get-Content -LiteralPath $DeploymentMarker -Raw | ConvertFrom-Json).composeId
+}
+
+if ([string]::IsNullOrWhiteSpace($DokployUrl) -or
+    [string]::IsNullOrWhiteSpace($DokployApiKey) -or
+    [string]::IsNullOrWhiteSpace($ComposeId)) {
+    throw "DOKPLOY_URL, DOKPLOY_API_KEY, and the deployed Compose ID are required"
+}
 
 function Invoke-Rtk {
     param([Parameter(Mandatory)][string[]]$Arguments, [switch]$AllowFailure)
@@ -45,6 +59,14 @@ if sudo ss -ltnH 'sport = :4021' | grep -q .; then
   echo 'unexpected host listener on 4021' >&2
   exit 1
 fi
+tailscale_container=$(sudo docker ps --filter label=com.docker.compose.service=tailscale --format '{{.ID}}')
+test "$(wc -w <<<"$tailscale_container")" -eq 1
+funnel_status=$(sudo docker exec "$tailscale_container" tailscale funnel status --json)
+compact_funnel=$(printf '%s' "$funnel_status" | tr -d '[:space:]')
+if printf '%s' "$compact_funnel" | grep -Eq '"AllowFunnel":\{[^}]*true'; then
+  echo 'unexpected Tailscale Funnel exposure' >&2
+  exit 1
+fi
 '@
 Invoke-Rtk -Arguments @(
     "gcloud.cmd", "compute", "ssh", $Instance,
@@ -66,6 +88,18 @@ if ($publicProbe.Code -eq 0) {
     throw "public port 4021 is reachable"
 }
 Write-Host "public port 4021 is closed"
+
+$domainRequest = @{
+    Uri = "$($DokployUrl.TrimEnd('/'))/api/domain.byComposeId?composeId=$ComposeId"
+    Method = "Get"
+    Headers = @{ "x-api-key" = $DokployApiKey }
+    TimeoutSec = 15
+}
+$domains = @(Invoke-RestMethod @domainRequest)
+if ($domains.Count -ne 0) {
+    throw "Symphony has Dokploy domains and is not private-only"
+}
+Write-Host "Dokploy domains and Tailscale Funnel exposure are absent"
 
 if ([string]::IsNullOrWhiteSpace($OmniRouteApiKey) -or [string]::IsNullOrWhiteSpace($Model)) {
     throw "OMNIROUTE_API_KEY and SYMPHONY_MODEL are required"

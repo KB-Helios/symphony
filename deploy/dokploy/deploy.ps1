@@ -8,12 +8,14 @@ param(
     [string]$DokployUrl = $env:DOKPLOY_URL,
     [string]$DokployApiKey = $env:DOKPLOY_API_KEY,
     [string]$Repository = "https://github.com/KB-Helios/symphony.git",
-    [string]$Branch = "codex/dokploy-omniroute"
+    [string]$Branch = "codex/dokploy-omniroute",
+    [int]$PreparationMaxAgeMinutes = 30
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $PreparationMarker = Join-Path $PSScriptRoot ".prepared.json"
+$DeploymentMarker = Join-Path $PSScriptRoot ".deployment.json"
 
 if ($Prepare.IsPresent -eq $Deploy.IsPresent) {
     throw "Specify exactly one of -Prepare or -Deploy"
@@ -52,6 +54,25 @@ function Start-Target {
             "gcloud.cmd", "compute", "instances", "start", $Instance,
             "--zone", $Zone, "--project", $Project, "--quiet"
         ) | Out-Null
+    }
+}
+
+function Get-BootDiskIdentity {
+    param([Parameter(Mandatory)]$Vm)
+
+    $source = [string]$Vm.disks[0].source
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        throw "Target VM has no boot disk source"
+    }
+    $diskName = Split-Path -Leaf $source
+    $json = Invoke-Rtk -Arguments @(
+        "gcloud.cmd", "compute", "disks", "describe", $diskName,
+        "--zone", $Zone, "--project", $Project, "--format=json"
+    )
+    $disk = $json | ConvertFrom-Json
+    return [pscustomobject]@{
+        Source = $source
+        Id = [string]$disk.id
     }
 }
 
@@ -145,6 +166,18 @@ function Assert-RollbackPrepared {
         throw "Rollback proof contains an invalid backup path"
     }
 
+    $preparedAt = [DateTimeOffset]::Parse([string]$proof.preparedAt).ToUniversalTime()
+    $age = [DateTimeOffset]::UtcNow - $preparedAt
+    if ($age.TotalMinutes -lt -5 -or $age.TotalMinutes -gt $PreparationMaxAgeMinutes) {
+        throw "Rollback proof is stale; run deploy.ps1 -Prepare again"
+    }
+
+    $vm = Get-TargetInstance
+    $bootDisk = Get-BootDiskIdentity -Vm $vm
+    if ($proof.bootDiskSource -ne $bootDisk.Source -or [string]$proof.bootDiskId -ne $bootDisk.Id) {
+        throw "Rollback proof boot disk no longer matches the target VM"
+    }
+
     $status = Invoke-Rtk -Arguments @(
         "gcloud.cmd", "compute", "machine-images", "describe", $proof.machineImage,
         "--project", $Project, "--format=value(status)"
@@ -165,6 +198,7 @@ function Assert-RollbackPrepared {
 
 function Prepare-Rollback {
     $vm = Get-TargetInstance
+    $bootDisk = Get-BootDiskIdentity -Vm $vm
     Write-Host "Target verified: $($vm.name) ($($vm.status))"
     Start-Target
 
@@ -221,6 +255,8 @@ sudo sync
             project = $Project
             zone = $Zone
             instance = $Instance
+            bootDiskSource = $bootDisk.Source
+            bootDiskId = $bootDisk.Id
             machineImage = $imageName
             backupDir = $backupDir
             preparedAt = (Get-Date).ToUniversalTime().ToString("o")
@@ -282,6 +318,11 @@ function Deploy-Symphony {
         }
     }
 
+    $domains = @(Invoke-Dokploy -Route "domain.byComposeId?composeId=$($compose.composeId)" -Method Get)
+    if ($domains.Count -ne 0) {
+        throw "Refusing private deployment because the Symphony Compose has Dokploy domains"
+    }
+
     if ($isNew) {
         $values = Get-RequiredEnvironment -RequireTailscaleKey:$true
     }
@@ -298,6 +339,11 @@ function Deploy-Symphony {
         autoDeploy = $false
     } | Out-Null
 
+    $domains = @(Invoke-Dokploy -Route "domain.byComposeId?composeId=$($compose.composeId)" -Method Get)
+    if ($domains.Count -ne 0) {
+        throw "Refusing private deployment because Dokploy domains appeared after update"
+    }
+
     Invoke-Dokploy -Route "compose.saveEnvironment" -Body @{
         composeId = $compose.composeId
         env = $envLines
@@ -309,6 +355,15 @@ function Deploy-Symphony {
         title = "Deploy Symphony $Branch"
         description = "Private Tailscale deployment with durable state"
     } | Out-Null
+
+    $deployment = [ordered]@{
+        schema = 1
+        projectId = $projectRecord.projectId
+        composeId = $compose.composeId
+        deployedAt = [DateTimeOffset]::UtcNow.ToString("o")
+    }
+    [IO.File]::WriteAllText($DeploymentMarker, ($deployment | ConvertTo-Json -Depth 3))
+    Remove-Item -LiteralPath $PreparationMarker -Force
 
     Write-Host "Dokploy deployment queued: project=$($projectRecord.projectId) compose=$($compose.composeId)"
     Write-Host "No domain or public port was created"

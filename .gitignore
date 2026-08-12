@@ -1,2 +1,3 @@
 .worktrees/
 deploy/dokploy/.prepared.json
+deploy/dokploy/.deployment.json

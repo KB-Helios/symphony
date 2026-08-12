@@ -4,6 +4,7 @@ defmodule SymphonyElixir.DeploymentConfigTest do
   @repo_root Path.expand("../../..", __DIR__)
   @compose_path Path.join(@repo_root, "deploy/dokploy/compose.yaml")
   @dockerfile_path Path.join(@repo_root, "Dockerfile")
+  @entrypoint_path Path.join(@repo_root, "deploy/dokploy/entrypoint.sh")
 
   test "Dokploy compose keeps Symphony private and all durable data on named volumes" do
     assert {:ok, %{"services" => services, "volumes" => volumes}} =
@@ -16,7 +17,7 @@ defmodule SymphonyElixir.DeploymentConfigTest do
     refute Map.has_key?(symphony, "ports")
     assert symphony["restart"] == "unless-stopped"
     assert symphony["read_only"] == true
-    assert symphony["stop_grace_period"] == "2m"
+    assert symphony["stop_grace_period"] == "150s"
     assert symphony["pids_limit"] == 512
     assert is_map(symphony["healthcheck"])
 
@@ -36,5 +37,18 @@ defmodule SymphonyElixir.DeploymentConfigTest do
 
     assert dockerfile =~ "USER 10001:10001"
     assert dockerfile =~ ~s(VOLUME ["/var/lib/symphony/state", "/var/lib/symphony/workspaces", "/var/lib/symphony/codex"])
+  end
+
+  test "runtime image keeps Codex's global-bin symlink for native package resolution" do
+    dockerfile = File.read!(@dockerfile_path)
+
+    refute dockerfile =~ "COPY --from=codex /usr/local/bin/codex /usr/local/bin/codex"
+    assert dockerfile =~ "ln -s /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex"
+  end
+
+  test "entrypoint forwards container shutdown signals directly to the BEAM" do
+    entrypoint = File.read!(@entrypoint_path)
+
+    assert entrypoint =~ "exec flock --no-fork --exclusive --nonblock"
   end
 end

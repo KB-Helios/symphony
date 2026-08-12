@@ -234,12 +234,11 @@ defmodule SymphonyElixir.Orchestrator do
         {updated_running_entry, token_delta} = integrate_codex_update(running_entry, update)
 
         state =
-          state
+          %{state | running: Map.put(running, issue_id, updated_running_entry)}
           |> apply_codex_token_delta(token_delta)
           |> apply_codex_rate_limits(update)
           |> update_issue_budget(issue_id, update, token_delta)
 
-        state = %{state | running: Map.put(running, issue_id, updated_running_entry)}
         state = maybe_persist_telemetry(state, update)
 
         notify_dashboard()
@@ -251,9 +250,13 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
     result =
-      case pop_retry_attempt_state(state, issue_id, retry_token) do
-        {:ok, attempt, metadata, state} -> handle_retry_issue(state, issue_id, attempt, metadata)
-        :missing -> {:noreply, state}
+      if dispatch_allowed?(state) do
+        case pop_retry_attempt_state(state, issue_id, retry_token) do
+          {:ok, attempt, metadata, state} -> handle_retry_issue(state, issue_id, attempt, metadata)
+          :missing -> {:noreply, state}
+        end
+      else
+        {:noreply, state |> suspend_retry(issue_id, retry_token) |> persist_or_disable()}
       end
 
     notify_dashboard()
@@ -323,16 +326,23 @@ defmodule SymphonyElixir.Orchestrator do
       |> reconcile_running_issues()
       |> reconcile_blocked_issues()
 
+    case check_model_router(state) do
+      {:ok, state} -> maybe_dispatch_with_tracker(state)
+      {:error, state} -> state
+    end
+  end
+
+  defp check_model_router(%State{} = state) do
     case state.router_check.() do
       :ok ->
-        state
-        |> Map.put(:last_model_router_success_at, DateTime.utc_now())
-        |> Map.put(:last_model_router_error, nil)
-        |> maybe_dispatch_with_tracker()
+        {:ok,
+         state
+         |> Map.put(:last_model_router_success_at, DateTime.utc_now())
+         |> Map.put(:last_model_router_error, nil)}
 
       {:error, reason} ->
         Logger.error("Private model router readiness failed: #{inspect(reason)}")
-        %{state | last_model_router_error: reason}
+        {:error, %{state | last_model_router_error: reason}}
     end
   end
 
@@ -1119,7 +1129,7 @@ defmodule SymphonyElixir.Orchestrator do
       running_entry = %{running_entry | pid: pid, ref: ref}
       %{persisted_state | running: Map.put(persisted_state.running, issue.id, running_entry)}
     else
-      exhausted when exhausted in [:wall_time, :tokens, :abnormal_failures] ->
+      exhausted when exhausted in [:wall_time, :turns, :tokens, :abnormal_failures] ->
         block_budget_exhausted(state, issue, budget, exhausted, harness, worker_host, workspace_path)
 
       {:error, :attempts, exhausted_budget} ->
@@ -1330,9 +1340,6 @@ defmodule SymphonyElixir.Orchestrator do
     next_attempt = if is_integer(attempt), do: attempt, else: previous_retry.attempt + 1
     delay_ms = retry_delay(next_attempt, metadata)
     old_timer = Map.get(previous_retry, :timer_ref)
-    retry_token = make_ref()
-    due_at_ms = System.monotonic_time(:millisecond) + delay_ms
-    due_at = DateTime.add(DateTime.utc_now(), delay_ms, :millisecond)
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     issue_url = pick_retry_issue_url(previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
@@ -1343,11 +1350,27 @@ defmodule SymphonyElixir.Orchestrator do
       Process.cancel_timer(old_timer)
     end
 
-    timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms)
+    {timer_ref, retry_token, due_at_ms, due_at} =
+      if dispatch_allowed?(state) do
+        retry_token = make_ref()
+
+        {
+          Process.send_after(self(), {:retry_issue, issue_id, retry_token}, delay_ms),
+          retry_token,
+          System.monotonic_time(:millisecond) + delay_ms,
+          DateTime.add(DateTime.utc_now(), delay_ms, :millisecond)
+        }
+      else
+        {nil, nil, nil, nil}
+      end
 
     error_suffix = if is_binary(error), do: " error=#{error}", else: ""
 
-    Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
+    if dispatch_allowed?(state) do
+      Logger.warning("Retrying issue_id=#{issue_id} issue_identifier=#{identifier} in #{delay_ms}ms (attempt #{next_attempt})#{error_suffix}")
+    else
+      Logger.info("Retaining suspended retry issue_id=#{issue_id} issue_identifier=#{identifier} (attempt #{next_attempt})#{error_suffix}")
+    end
 
     %{
       state
@@ -1366,6 +1389,43 @@ defmodule SymphonyElixir.Orchestrator do
           })
     }
     |> persist_or_disable()
+  end
+
+  defp dispatch_allowed?(%State{} = state), do: state.dispatch_enabled and not state.draining
+
+  defp suspend_all_retries(%State{} = state) do
+    retry_attempts =
+      Map.new(state.retry_attempts, fn {issue_id, retry_entry} ->
+        if is_reference(retry_entry[:timer_ref]) do
+          Process.cancel_timer(retry_entry.timer_ref)
+        end
+
+        {issue_id,
+         retry_entry
+         |> Map.put(:timer_ref, nil)
+         |> Map.put(:retry_token, nil)
+         |> Map.put(:due_at_ms, nil)
+         |> Map.put(:due_at, nil)}
+      end)
+
+    %{state | retry_attempts: retry_attempts}
+  end
+
+  defp suspend_retry(%State{} = state, issue_id, retry_token) do
+    case Map.get(state.retry_attempts, issue_id) do
+      %{retry_token: ^retry_token} = retry_entry ->
+        suspended =
+          retry_entry
+          |> Map.put(:timer_ref, nil)
+          |> Map.put(:retry_token, nil)
+          |> Map.put(:due_at_ms, nil)
+          |> Map.put(:due_at, nil)
+
+        %{state | retry_attempts: Map.put(state.retry_attempts, issue_id, suspended)}
+
+      _ ->
+        state
+    end
   end
 
   defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
@@ -1387,21 +1447,33 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_retry_issue(%State{} = state, issue_id, attempt, metadata) do
-    case Tracker.fetch_issues_by_ids([issue_id]) do
-      {:ok, issues} ->
-        issues
-        |> find_issue_by_id(issue_id)
-        |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
+    case check_model_router(state) do
+      {:ok, state} ->
+        case Tracker.fetch_issues_by_ids([issue_id]) do
+          {:ok, issues} ->
+            issues
+            |> find_issue_by_id(issue_id)
+            |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
 
-      {:error, reason} ->
-        Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
+          {:error, reason} ->
+            Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
 
+            {:noreply,
+             schedule_issue_retry(
+               state,
+               issue_id,
+               attempt + 1,
+               Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"})
+             )}
+        end
+
+      {:error, state} ->
         {:noreply,
          schedule_issue_retry(
            state,
            issue_id,
-           attempt + 1,
-           Map.merge(metadata, %{error: "retry poll failed: #{inspect(reason)}"})
+           attempt,
+           Map.merge(metadata, %{error: "private model router unavailable"})
          )}
     end
   end
@@ -1753,15 +1825,17 @@ defmodule SymphonyElixir.Orchestrator do
   def handle_call({:drain, timeout_ms}, _from, state) do
     cancel_tick_timer(state.tick_timer_ref)
 
-    state = %{
+    state =
       state
-      | draining: true,
+      |> Map.merge(%{
+        draining: true,
         dispatch_enabled: false,
         poll_check_in_progress: false,
         tick_timer_ref: nil,
         tick_token: nil,
         next_poll_due_at_ms: nil
-    }
+      })
+      |> suspend_all_retries()
 
     state = persist_or_disable(state)
 
@@ -1808,7 +1882,7 @@ defmodule SymphonyElixir.Orchestrator do
         %{
           issue_id: issue_id,
           attempt: attempt,
-          due_in_ms: max(0, due_at_ms - now_ms),
+          due_in_ms: retry_due_in_ms(due_at_ms, now_ms),
           identifier: Map.get(retry, :identifier),
           issue_url: Map.get(retry, :issue_url),
           error: Map.get(retry, :error),
@@ -2012,15 +2086,16 @@ defmodule SymphonyElixir.Orchestrator do
 
     Logger.error("Durable state checkpoint failed; disabling dispatch: #{inspect(reason)}")
 
-    %{
-      state
-      | dispatch_enabled: false,
-        persistence_error: reason,
-        poll_check_in_progress: false,
-        tick_timer_ref: nil,
-        tick_token: nil,
-        next_poll_due_at_ms: nil
-    }
+    state
+    |> Map.merge(%{
+      dispatch_enabled: false,
+      persistence_error: reason,
+      poll_check_in_progress: false,
+      tick_timer_ref: nil,
+      tick_token: nil,
+      next_poll_due_at_ms: nil
+    })
+    |> suspend_all_retries()
   end
 
   defp record_poll_error(%State{} = state, code) do
@@ -2047,12 +2122,24 @@ defmodule SymphonyElixir.Orchestrator do
   defp update_issue_budget(%State{} = state, issue_id, update, token_delta) do
     case Map.get(state.budgets, issue_id) do
       %Budget{} = budget ->
-        budget =
-          budget
-          |> Budget.add_tokens(token_delta.input_tokens, token_delta.output_tokens, update.timestamp)
-          |> maybe_authorize_completed_turn(update)
+        budget = Budget.add_tokens(budget, token_delta.input_tokens, token_delta.output_tokens, update.timestamp)
+        {budget, turn_denied?} = maybe_authorize_completed_turn(budget, update)
+        dimension = Budget.exhausted_dimension(budget, Budget.limits(Config.settings!().agent), update.timestamp)
 
-        %{state | budgets: Map.put(state.budgets, issue_id, budget)}
+        state = %{
+          state
+          | budgets: Map.put(state.budgets, issue_id, budget),
+            running:
+              Map.update(state.running, issue_id, nil, fn entry ->
+                Map.put(entry, :budget, budget)
+              end)
+        }
+
+        if turn_denied? or not is_nil(dimension) do
+          block_running_budget_exhausted(state, issue_id, budget, dimension || :turns)
+        else
+          state
+        end
 
       _ ->
         state
@@ -2061,12 +2148,36 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp maybe_authorize_completed_turn(%Budget{} = budget, %{event: :turn_completed, timestamp: now}) do
     case Budget.authorize_turn(budget, Budget.limits(Config.settings!().agent), now) do
-      {:ok, updated} -> updated
-      {:error, _dimension, unchanged} -> unchanged
+      {:ok, updated} -> {updated, false}
+      {:error, :turns, unchanged} -> {unchanged, true}
     end
   end
 
-  defp maybe_authorize_completed_turn(%Budget{} = budget, _update), do: budget
+  defp maybe_authorize_completed_turn(%Budget{} = budget, _update), do: {budget, false}
+
+  defp block_running_budget_exhausted(%State{} = state, issue_id, budget, dimension) do
+    case Map.get(state.running, issue_id) do
+      %{issue: issue} = running_entry ->
+        stop_running_task(
+          Map.get(running_entry, :pid),
+          Map.get(running_entry, :ref),
+          state.task_supervisor
+        )
+
+        block_budget_exhausted(
+          state,
+          issue,
+          budget,
+          dimension,
+          Map.get(running_entry, :harness, "codex"),
+          Map.get(running_entry, :worker_host),
+          Map.get(running_entry, :workspace_path)
+        )
+
+      _ ->
+        state
+    end
+  end
 
   defp record_budget_completion(%State{} = state, issue_id, reason) do
     case Map.get(state.budgets, issue_id) do
@@ -2236,7 +2347,7 @@ defmodule SymphonyElixir.Orchestrator do
       stop_running_task(Map.get(entry, :pid), Map.get(entry, :ref), state.task_supervisor)
     end)
 
-    %{state | running: %{}}
+    state
   end
 
   defp schedule_poll_cycle_start do
@@ -2249,6 +2360,11 @@ defmodule SymphonyElixir.Orchestrator do
   defp next_poll_in_ms(next_poll_due_at_ms, now_ms) when is_integer(next_poll_due_at_ms) do
     max(0, next_poll_due_at_ms - now_ms)
   end
+
+  defp retry_due_in_ms(due_at_ms, now_ms) when is_integer(due_at_ms),
+    do: max(0, due_at_ms - now_ms)
+
+  defp retry_due_in_ms(_due_at_ms, _now_ms), do: nil
 
   defp pop_running_entry(state, issue_id) do
     {Map.get(state.running, issue_id), %{state | running: Map.delete(state.running, issue_id)}}

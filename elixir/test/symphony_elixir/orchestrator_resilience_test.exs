@@ -146,6 +146,52 @@ defmodule SymphonyElixir.OrchestratorResilienceTest do
     stop_orchestrator(pid)
   end
 
+  test "the final allowed turn stops and checkpoints the running worker", %{state_path: state_path} do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "memory",
+      poll_interval_ms: 60_000,
+      max_concurrent_agents: 1,
+      max_total_turns_per_issue: 1,
+      tracker_required_labels: []
+    )
+
+    issue = issue("issue-turn-budget", "SYM-TURN-BUDGET")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    parent = self()
+
+    runner = fn started_issue, recipient, _opts ->
+      send(parent, {:started, started_issue.id, recipient})
+      Process.sleep(:infinity)
+    end
+
+    pid = start_orchestrator!(state_path: state_path, runner: runner)
+    assert_receive {:started, "issue-turn-budget", recipient}, 1_000
+
+    send(recipient, {
+      :codex_worker_update,
+      issue.id,
+      %{event: :turn_completed, timestamp: DateTime.utc_now(), payload: "done"}
+    })
+
+    assert eventually(fn ->
+             match?(
+               {:ok,
+                %{
+                  "claims" => %{
+                    "issue-turn-budget" => %{
+                      "status" => "blocked",
+                      "last_error" => "budget exhausted: turns",
+                      "budget" => %{"total_turns" => 1}
+                    }
+                  }
+                }},
+               StateStore.load(state_path)
+             )
+           end)
+
+    stop_orchestrator(pid)
+  end
+
   test "drain persists the non-ready state and stops future polling", %{state_path: state_path} do
     Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
     pid = start_orchestrator!(state_path: state_path)
@@ -161,6 +207,78 @@ defmodule SymphonyElixir.OrchestratorResilienceTest do
            } = Orchestrator.health(pid)
 
     assert {:ok, %{"draining" => true}} = StateStore.load(state_path)
+    stop_orchestrator(pid)
+  end
+
+  test "drain cancels recovered retry dispatch and retains the claim", %{state_path: state_path} do
+    issue = issue("issue-drain-retry", "SYM-DRAIN-RETRY")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    write_interrupted_claim!(state_path, issue)
+    parent = self()
+    runner = fn started_issue, _recipient, _opts -> send(parent, {:started, started_issue.id}) end
+
+    pid =
+      start_orchestrator!(
+        state_path: state_path,
+        runner: runner,
+        recovery_backoff_ms: 100
+      )
+
+    assert :ok = Orchestrator.drain(pid, 50)
+    refute_receive {:started, "issue-drain-retry"}, 250
+
+    assert {:ok, %{"claims" => %{"issue-drain-retry" => %{"status" => "retrying"}}}} =
+             StateStore.load(state_path)
+
+    stop_orchestrator(pid)
+  end
+
+  test "drain deadline checkpoints active claims before stopping workers", %{state_path: state_path} do
+    issue = issue("issue-drain-running", "SYM-DRAIN-RUNNING")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    parent = self()
+
+    runner = fn started_issue, _recipient, _opts ->
+      send(parent, {:started, started_issue.id})
+
+      receive do
+        :finish -> :ok
+      end
+    end
+
+    pid = start_orchestrator!(state_path: state_path, runner: runner)
+    assert_receive {:started, "issue-drain-running"}, 1_000
+    assert :ok = Orchestrator.drain(pid, 10)
+    Process.sleep(100)
+
+    assert {:ok, %{"claims" => %{"issue-drain-running" => claim}, "draining" => true}} =
+             StateStore.load(state_path)
+
+    assert claim["status"] in ["running", "retrying"]
+    stop_orchestrator(pid)
+  end
+
+  test "recovered retries stay queued while the private router is unavailable", %{state_path: state_path} do
+    issue = issue("issue-retry-router", "SYM-RETRY-ROUTER")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    write_interrupted_claim!(state_path, issue)
+    parent = self()
+    runner = fn started_issue, _recipient, _opts -> send(parent, {:started, started_issue.id}) end
+
+    pid =
+      start_orchestrator!(
+        state_path: state_path,
+        runner: runner,
+        router_check: fn -> {:error, :router_unreachable} end,
+        recovery_backoff_ms: 50
+      )
+
+    refute_receive {:started, "issue-retry-router"}, 250
+    assert %{model_router: {:error, :router_unreachable}} = Orchestrator.health(pid)
+
+    assert {:ok, %{"claims" => %{"issue-retry-router" => %{"status" => "retrying"}}}} =
+             StateStore.load(state_path)
+
     stop_orchestrator(pid)
   end
 
@@ -188,6 +306,31 @@ defmodule SymphonyElixir.OrchestratorResilienceTest do
       blocked_by: [],
       dispatchable: true
     }
+  end
+
+  defp write_interrupted_claim!(state_path, issue) do
+    snapshot =
+      RuntimeState.from_orchestrator(
+        %{
+          running: %{
+            issue.id => %{
+              identifier: issue.identifier,
+              issue: issue,
+              harness: "codex",
+              retry_attempt: 1,
+              workspace_path: "/var/lib/symphony/workspaces/#{issue.identifier}",
+              started_at: DateTime.utc_now()
+            }
+          },
+          retry_attempts: %{},
+          blocked: %{},
+          completed: MapSet.new(),
+          draining: false
+        },
+        DateTime.utc_now()
+      )
+
+    StateStore.save(state_path, snapshot)
   end
 
   defp eventually(fun, attempts \\ 50)

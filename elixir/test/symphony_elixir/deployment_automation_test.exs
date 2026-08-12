@@ -14,7 +14,11 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert deploy =~ ~s("machine-images", "create")
     assert deploy =~ ".prepared.json"
     assert deploy =~ "machine-images\", \"describe"
+    assert deploy =~ "bootDiskId"
+    assert deploy =~ "PreparationMaxAgeMinutes"
+    assert deploy =~ "Remove-Item -LiteralPath $PreparationMarker"
     assert deploy =~ "/models"
+    assert deploy =~ "domain.byComposeId"
     assert deploy =~ "compose.saveEnvironment"
     assert deploy =~ "compose.deploy"
     refute deploy =~ "lin_api_"
@@ -28,5 +32,7 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert verify =~ "/v1/responses"
     assert verify =~ "symphony-state"
     assert verify =~ "public port 4021"
+    assert verify =~ "domain.byComposeId"
+    assert verify =~ "tailscale funnel status"
   end
 end

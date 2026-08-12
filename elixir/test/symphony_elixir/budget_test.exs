@@ -37,9 +37,12 @@ defmodule SymphonyElixir.BudgetTest do
              Budget.authorize_turn(%{budget | total_turns: 100}, limits, @started_at)
   end
 
-  test "tokens, wall time, and consecutive abnormal failures exhaust at exact limits" do
+  test "turns, tokens, wall time, and consecutive abnormal failures exhaust at exact limits" do
     limits = Budget.limits(Config.settings!().agent)
     budget = Budget.new("issue-1", "SYM-1", @started_at)
+
+    turn_budget = %{budget | total_turns: limits.turns}
+    assert Budget.exhausted_dimension(turn_budget, limits, @started_at) == :turns
 
     token_budget = Budget.add_tokens(budget, 1_200_000, 800_000, @started_at)
     assert Budget.exhausted_dimension(token_budget, limits, @started_at) == :tokens

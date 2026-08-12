@@ -25,7 +25,7 @@ workspace:
   root: /var/lib/symphony/workspaces
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
+    git clone --depth 1 https://github.com/KB-Helios/symphony.git .
     cd elixir && mix deps.get
   before_remove: |
     cd elixir && mix workspace.before_remove
