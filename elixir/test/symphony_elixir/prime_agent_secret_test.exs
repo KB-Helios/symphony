@@ -20,8 +20,8 @@ defmodule SymphonyElixir.PrimeAgentSecretTest do
     assert "MY_TEST_LINEAR_TOKEN" in binding.secret_environment_names
 
     cmd = PrimeAppServer.remote_launch_command_for_test("/tmp/ws-test")
-    assert String.contains?(cmd, "unset")
-    assert String.contains?(cmd, "MY_TEST_LINEAR_TOKEN")
+    assert String.contains?(cmd, "env -i")
+    refute String.contains?(cmd, "MY_TEST_LINEAR_TOKEN")
     assert String.contains?(cmd, "cd ")
   end
 
@@ -70,9 +70,9 @@ defmodule SymphonyElixir.PrimeAgentSecretTest do
 
     snapshot_cmd = PrimeAppServer.remote_launch_command_for_test("/tmp/ws-snap", binding_before)
     live_cmd = PrimeAppServer.remote_launch_command_for_test("/tmp/ws-snap", live_binding)
-    assert String.contains?(snapshot_cmd, "MY_SNAPSHOT_TOKEN")
-    assert String.contains?(live_cmd, "MY_NEW_TOKEN")
-    refute snapshot_cmd == live_cmd
+    refute String.contains?(snapshot_cmd, "MY_SNAPSHOT_TOKEN")
+    refute String.contains?(live_cmd, "MY_NEW_TOKEN")
+    assert snapshot_cmd == live_cmd
   end
 
   test "prime elicitation maps to turn_input_required" do

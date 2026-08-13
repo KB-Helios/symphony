@@ -1,0 +1,75 @@
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: symphony-prod
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_AUTH_ONCE: "true"
+      TS_ACCEPT_DNS: "true"
+      TS_EXTRA_ARGS: --advertise-tags=tag:symphony
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+    healthcheck:
+      test: [CMD, tailscale, status, --json]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  symphony:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        CODEX_VERSION: "0.147.0"
+    restart: unless-stopped
+    init: true
+    network_mode: service:tailscale
+    depends_on:
+      tailscale:
+        condition: service_healthy
+    environment:
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}
+      LINEAR_API_KEY: ${LINEAR_API_KEY:?LINEAR_API_KEY is required}
+      LINEAR_ASSIGNEE: ${LINEAR_ASSIGNEE:-}
+      OMNIROUTE_BASE_URL: ${OMNIROUTE_BASE_URL:-https://ai-router-main.tail31b2b0.ts.net/v1}
+      OMNIROUTE_API_KEY: ${OMNIROUTE_API_KEY:?OMNIROUTE_API_KEY is required}
+      SYMPHONY_MODEL: ${SYMPHONY_MODEL:-kimi-k3}
+      SYMPHONY_STATE_ROOT: /var/lib/symphony/state
+    volumes:
+      - symphony_state:/var/lib/symphony/state
+      - symphony_workspaces:/var/lib/symphony/workspaces
+      - symphony_codex:/var/lib/symphony/codex
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    read_only: true
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 512
+    cap_drop:
+      - ALL
+    stop_grace_period: 150s
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, --show-error, http://127.0.0.1:4021/api/v1/health]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+volumes:
+  tailscale_state:
+    name: symphony-tailscale
+  symphony_state:
+    name: symphony-state
+  symphony_workspaces:
+    name: symphony-workspaces
+  symphony_codex:
+    name: symphony-codex

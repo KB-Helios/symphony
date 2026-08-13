@@ -497,7 +497,7 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp validate_recorded_workspace_path(workspace) when is_binary(workspace) do
-    validate_local_workspace_path(workspace, Path.dirname(workspace))
+    validate_local_workspace_path(workspace, Config.local_workspace_root())
   end
 
   defp validate_local_workspace_path(workspace, workspace_root)

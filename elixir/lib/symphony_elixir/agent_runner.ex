@@ -38,7 +38,7 @@ defmodule SymphonyElixir.AgentRunner do
   defp run_on_worker_host(issue, codex_update_recipient, opts, worker_host) do
     Logger.info("Starting worker attempt for #{issue_context(issue)} worker_host=#{worker_host_for_log(worker_host)}")
 
-    case Workspace.create_for_issue(issue, worker_host) do
+    case workspace_for_attempt(issue, worker_host, opts) do
       {:ok, workspace} ->
         send_worker_runtime_info(codex_update_recipient, issue, worker_host, workspace)
 
@@ -54,6 +54,27 @@ defmodule SymphonyElixir.AgentRunner do
         {:error, reason}
     end
   end
+
+  defp workspace_for_attempt(issue, nil, opts) do
+    case Keyword.get(opts, :workspace_path) do
+      path when is_binary(path) and path != "" ->
+        expected_root = Config.local_workspace_root() |> Path.expand()
+        expanded_path = Path.expand(path)
+
+        if File.dir?(expanded_path) and
+             String.starts_with?(expanded_path <> "/", expected_root <> "/") do
+          {:ok, expanded_path}
+        else
+          Workspace.create_for_issue(issue, nil)
+        end
+
+      _ ->
+        Workspace.create_for_issue(issue, nil)
+    end
+  end
+
+  defp workspace_for_attempt(issue, worker_host, _opts),
+    do: Workspace.create_for_issue(issue, worker_host)
 
   defp codex_message_handler(recipient, issue) do
     fn message ->

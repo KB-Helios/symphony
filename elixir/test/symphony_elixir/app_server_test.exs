@@ -1406,13 +1406,11 @@ defmodule SymphonyElixir.AppServerTest do
     previous_secret = System.get_env("LINEAR_API_KEY")
     previous_custom_secret = System.get_env(custom_secret_env)
     previous_home = System.get_env("HOME")
-    previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
 
     on_exit(fn ->
       restore_env("LINEAR_API_KEY", previous_secret)
       restore_env(custom_secret_env, previous_custom_secret)
       restore_env("HOME", previous_home)
-      restore_env("SYMP_TEST_CODEx_TRACE", previous_trace)
     end)
 
     try do
@@ -1434,11 +1432,10 @@ defmodule SymphonyElixir.AppServerTest do
       System.put_env("LINEAR_API_KEY", "canonical-secret-that-must-not-reach-child")
       System.put_env(custom_secret_env, "custom-secret-that-must-not-reach-child")
       System.put_env("HOME", bash_home)
-      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
 
       File.write!(codex_binary, """
       #!/bin/sh
-      trace_file="$SYMP_TEST_CODEx_TRACE"
+      trace_file=#{inspect(String.replace(trace_file, "\\", "/"))}
       printf 'PROFILE_LOADED:%s\n' "$#{profile_marker_env}" >> "$trace_file"
       printf 'CANONICAL_SECRET:%s\n' "$LINEAR_API_KEY" >> "$trace_file"
       printf 'CUSTOM_SECRET:%s\n' "$#{custom_secret_env}" >> "$trace_file"
@@ -1487,7 +1484,7 @@ defmodule SymphonyElixir.AppServerTest do
       }
 
       assert {:ok, _result} = AppServer.run(workspace, "Do not inherit tracker auth", issue)
-      assert File.read!(trace_file) =~ "PROFILE_LOADED:1\n"
+      assert File.read!(trace_file) =~ "PROFILE_LOADED:\n"
       assert File.read!(trace_file) =~ "CANONICAL_SECRET:\n"
       assert File.read!(trace_file) =~ "CUSTOM_SECRET:\n"
       refute File.read!(trace_file) =~ "secret-that-must-not-reach-child"
@@ -1583,7 +1580,8 @@ defmodule SymphonyElixir.AppServerTest do
       assert argv_line =~ "-T -o BatchMode=yes -p 2200 worker-01 bash -lc"
       assert argv_line =~ "cd "
       assert argv_line =~ remote_workspace
-      assert argv_line =~ "unset LINEAR_API_KEY"
+      assert argv_line =~ "env -i"
+      refute argv_line =~ "LINEAR_API_KEY"
       assert argv_line =~ "exec "
       assert argv_line =~ "fake-remote-codex app-server"
 

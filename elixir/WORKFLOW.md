@@ -3,7 +3,8 @@ tracker:
   kind: linear
   provider:
     project_slug: "symphony-0c79b11b75ea"
-  required_labels: []
+  required_labels:
+    - symphony-ready
   active_states:
     - Todo
     - In Progress
@@ -17,21 +18,30 @@ tracker:
     - Done
 polling:
   interval_ms: 5000
+server:
+  host: 0.0.0.0
+  port: 4021
 workspace:
-  root: ~/code/symphony-workspaces
+  root: /var/lib/symphony/workspaces
 hooks:
   after_create: |
-    git clone --depth 1 https://github.com/openai/symphony .
-    if command -v mise >/dev/null 2>&1; then
-      cd elixir && mise trust && mise exec -- mix deps.get
-    fi
+    git clone --depth 1 https://github.com/KB-Helios/symphony.git .
+    cd elixir && mix deps.get
   before_remove: |
-    cd elixir && mise exec -- mix workspace.before_remove
+    cd elixir && mix workspace.before_remove
 agent:
-  max_concurrent_agents: 10
+  max_concurrent_agents: 1
   max_turns: 20
+  max_attempts_per_issue: 10
+  max_total_turns_per_issue: 100
+  max_wall_time_ms_per_issue: 14400000
+  max_total_tokens_per_issue: 2000000
+  max_consecutive_abnormal_failures: 5
+runtime:
+  graceful_drain_timeout_ms: 120000
+  recovery_backoff_ms: 30000
 codex:
-  command: codex --config shell_environment_policy.inherit=all --config 'model="gpt-5.5"' --config model_reasoning_effort=xhigh app-server
+  command: codex --model "$SYMPHONY_MODEL" --config model_provider=omniroute app-server
   approval_policy: never
   thread_sandbox: workspace-write
   turn_sandbox_policy:

@@ -17,7 +17,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   @behaviour SymphonyElixir.Harness
 
   require Logger
-  alias SymphonyElixir.{Config, Harness, PathSafety, SSH, Tracker}
+  alias SymphonyElixir.{ChildEnvironment, Config, Harness, PathSafety, SSH, Tracker}
 
   @json_mode_flag "--mode json"
 
@@ -168,7 +168,7 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
             :stderr_to_stdout,
             args: [~c"-lc", String.to_charlist(local_launch_command(dynamic_tool_binding))],
             cd: String.to_charlist(workspace),
-            env: tracker_secret_port_env(dynamic_tool_binding),
+            env: child_port_env(dynamic_tool_binding),
             line: Harness.port_line_bytes()
           ]
         )
@@ -184,41 +184,31 @@ defmodule SymphonyElixir.PrimeAgent.AppServer do
   end
 
   defp local_launch_command(dynamic_tool_binding) do
-    [
-      tracker_secret_unset_command(dynamic_tool_binding),
-      "exec #{Config.prime_command()}"
-    ]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join(" && ")
+    "exec #{child_environment_command(dynamic_tool_binding)} #{Config.prime_command()}"
   end
 
   defp remote_launch_command(workspace, dynamic_tool_binding) when is_binary(workspace) do
     [
       "cd #{shell_escape(workspace)}",
-      tracker_secret_unset_command(dynamic_tool_binding),
-      "exec #{Config.prime_command()}"
+      "exec #{child_environment_command(dynamic_tool_binding)} #{Config.prime_command()}"
     ]
-    |> Enum.reject(&is_nil/1)
     |> Enum.join(" && ")
   end
 
-  defp tracker_secret_port_env(dynamic_tool_binding) do
-    dynamic_tool_binding.secret_environment_names
-    |> valid_environment_names()
-    |> Enum.map(fn name -> {String.to_charlist(name), false} end)
+  defp child_port_env(dynamic_tool_binding) do
+    ChildEnvironment.port_env(
+      System.get_env(),
+      :prime,
+      dynamic_tool_binding.secret_environment_names
+    )
   end
 
-  defp tracker_secret_unset_command(dynamic_tool_binding) do
-    case dynamic_tool_binding.secret_environment_names |> valid_environment_names() do
-      [] -> nil
-      names -> "unset " <> Enum.join(names, " ")
-    end
-  end
-
-  defp valid_environment_names(names) do
-    Enum.filter(names || [], fn name ->
-      is_binary(name) and String.match?(name, ~r/^[A-Za-z_][A-Za-z0-9_]*$/)
-    end)
+  defp child_environment_command(dynamic_tool_binding) do
+    ChildEnvironment.shell_command(
+      System.get_env(),
+      :prime,
+      dynamic_tool_binding.secret_environment_names
+    )
   end
 
   # Exposed for testing — not part of Harness behaviour.

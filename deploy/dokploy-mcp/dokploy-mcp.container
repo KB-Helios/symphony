@@ -1,0 +1,27 @@
+[Unit]
+Description=Private redacted Dokploy MCP
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/dokploy-mcp:0.29.3
+ContainerName=dokploy-mcp
+EnvironmentFile=%h/.config/dokploy-mcp/env
+PublishPort=127.0.0.1:3003:3000
+DropCapability=all
+NoNewPrivileges=true
+ReadOnly=true
+Tmpfs=/tmp:rw,size=64m,mode=1777
+PodmanArgs=--cpus=0.5 --memory=384m --pids-limit=256
+HealthCmd=wget --quiet --spider http://127.0.0.1:3000/health
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+
+[Service]
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

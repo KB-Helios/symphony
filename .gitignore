@@ -1,0 +1,4 @@
+.worktrees/
+deploy/dokploy/.prepared.json
+deploy/dokploy/.deployment.json
+deploy/dokploy/.live.env

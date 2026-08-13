@@ -122,10 +122,9 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
-    assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
-    assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/KB-Helios/symphony.git ."
+    assert Map.get(hooks, "after_create") =~ "cd elixir && mix deps.get"
+    assert Map.get(hooks, "before_remove") =~ "cd elixir && mix workspace.before_remove"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -661,7 +660,7 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
-  test "terminal cleanup uses the workspace recorded for the running issue" do
+  test "terminal cleanup refuses a recorded workspace outside the configured root" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -721,7 +720,7 @@ defmodule SymphonyElixir.CoreTest do
 
       _updated_state = Orchestrator.reconcile_issue_states_for_test([issue], state)
 
-      refute File.exists?(old_workspace)
+      assert File.exists?(old_workspace)
       assert File.exists?(new_workspace)
     after
       File.rm_rf(test_root)

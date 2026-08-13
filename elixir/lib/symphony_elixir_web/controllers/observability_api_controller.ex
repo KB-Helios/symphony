@@ -13,6 +13,32 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     json(conn, %{status: "ok", version: app_version()})
   end
 
+  @spec ready(Conn.t(), map()) :: Conn.t()
+  def ready(conn, _params) do
+    case SymphonyElixir.Orchestrator.health(orchestrator()) do
+      %{ready?: true} ->
+        json(conn, %{status: "ready"})
+
+      %{persistence: {:error, _reason}} ->
+        readiness_error(conn, "state_unwritable")
+
+      %{draining: true} ->
+        readiness_error(conn, "draining")
+
+      %{last_tracker_poll_success_at: nil} ->
+        readiness_error(conn, "tracker_not_ready")
+
+      %{last_tracker_poll_error: reason} when not is_nil(reason) ->
+        readiness_error(conn, "tracker_unavailable")
+
+      %{model_router: {:error, _reason}} ->
+        readiness_error(conn, "model_router_unavailable")
+
+      _ ->
+        readiness_error(conn, "orchestrator_unavailable")
+    end
+  end
+
   @spec state(Conn.t(), map()) :: Conn.t()
   def state(conn, _params) do
     payload = Presenter.state_payload(orchestrator(), snapshot_timeout_ms())
@@ -97,6 +123,20 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
     conn
     |> put_status(status)
     |> json(%{error: %{code: code, message: message}})
+  end
+
+  defp readiness_error(conn, code) do
+    correlation_id = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+
+    conn
+    |> put_status(503)
+    |> json(%{
+      error: %{
+        code: code,
+        message: "service is not ready",
+        correlation_id: correlation_id
+      }
+    })
   end
 
   defp orchestrator do
