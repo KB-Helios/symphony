@@ -573,6 +573,57 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, missing_view, html} = live(build_conn(), "/sessions/MT-MISSING")
     assert html =~ "Issue not found"
     assert has_element?(missing_view, "a[href='/sessions']", "View all sessions")
+
+    assert html_response(get(build_conn(), "/sessions/MT-MISSING"), 200) =~
+             ~r/<title[^>]*>\s*Issue not found\s*·\s*Symphony\s*<\/title>/
+  end
+
+  test "session detail bounds long identifiers in found and not-found states" do
+    orchestrator_name = Module.concat(__MODULE__, :LongIdentifierOrchestrator)
+    identifier = String.duplicate("A", 256)
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+    snapshot = %{snapshot | running: [%{running | identifier: identifier}]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, found_view, _html} = live(build_conn(), "/sessions/#{identifier}")
+    assert has_element?(found_view, "#session-summary-heading.break-all", identifier)
+
+    missing_identifier = "MISSING-#{identifier}"
+    {:ok, missing_view, _html} = live(build_conn(), "/sessions/#{missing_identifier}")
+    assert has_element?(missing_view, ".mono.break-all", missing_identifier)
+  end
+
+  test "session detail shows only its backing blocked or retry context" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailContextOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, blocked_view, _html} = live(build_conn(), "/sessions/MT-BLOCKED")
+    assert has_element?(blocked_view, "section[aria-labelledby='blocked-context-heading']")
+    refute has_element?(blocked_view, "section[aria-labelledby='retry-context-heading']")
+    refute has_element?(blocked_view, "section[aria-labelledby='running-session-heading']")
+
+    {:ok, retry_view, _html} = live(build_conn(), "/sessions/MT-RETRY")
+    assert has_element?(retry_view, "section[aria-labelledby='retry-context-heading']")
+    refute has_element?(retry_view, "section[aria-labelledby='blocked-context-heading']")
+    refute has_element?(retry_view, "section[aria-labelledby='running-session-heading']")
+    assert has_element?(retry_view, "section[aria-labelledby='recent-events-heading']", "No events recorded yet.")
   end
 
   test "sessions exposes equivalent desktop and mobile collections" do

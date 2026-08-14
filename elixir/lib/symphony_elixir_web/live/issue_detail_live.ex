@@ -9,12 +9,14 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
 
   @impl true
   def mount(%{"identifier" => identifier}, _session, socket) do
+    result = load_issue(identifier)
+
     socket =
       socket
       |> assign(:identifier, identifier)
       |> assign(:current_path, "/sessions")
-      |> assign(:result, load_issue(identifier))
-      |> assign(:page_title, identifier)
+      |> assign(:result, result)
+      |> assign(:page_title, page_title(result, identifier))
 
     if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
 
@@ -23,7 +25,12 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
 
   @impl true
   def handle_info(:observability_updated, socket) do
-    {:noreply, assign(socket, :result, load_issue(socket.assigns.identifier))}
+    result = load_issue(socket.assigns.identifier)
+
+    {:noreply,
+     socket
+     |> assign(:result, result)
+     |> assign(:page_title, page_title(result, socket.assigns.identifier))}
   end
 
   @impl true
@@ -43,7 +50,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
               </span>
               <p class="mt-4 text-lg font-semibold tracking-tight">Issue not found</p>
               <p class="mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
-                <span class="mono rounded bg-muted px-1.5 py-0.5 text-xs"><%= @identifier %></span>
+                <span class="mono break-all rounded bg-muted px-1.5 py-0.5 text-xs"><%= @identifier %></span>
                 is not currently tracked by the runtime.
               </p>
               <.pill_link navigate="/sessions" class="mt-5">
@@ -63,7 +70,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
     ~H"""
     <section aria-labelledby="session-summary-heading">
       <.header>
-        <span id="session-summary-heading" class="mono text-[22px] tracking-tight"><%= @identifier %></span>
+        <span id="session-summary-heading" class="mono break-all text-[22px] tracking-tight"><%= @identifier %></span>
         <:subtitle>
           <span class="inline-flex flex-wrap items-center gap-2">
             <.status_badge status={@issue.status} />
@@ -308,4 +315,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   defp load_issue(identifier) do
     Presenter.issue_payload(identifier, SymphonyElixirWeb.orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
   end
+
+  defp page_title({:ok, _issue}, identifier), do: identifier
+  defp page_title({:error, _reason}, _identifier), do: "Issue not found"
 end
