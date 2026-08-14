@@ -23,7 +23,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
       |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
       |> assign(:filtered_retrying, filtered_retrying(payload, q))
       |> assign(:current_path, "/")
-      |> assign(:page_title, "Symphony — Operations")
+      |> assign(:page_title, "Operations")
 
     if connected?(socket) do
       :ok = ObservabilityPubSub.subscribe()
@@ -141,6 +141,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
           <.poll_indicator polling={@payload && @payload[:polling]} />
         </:actions>
       </.header>
+
+      <%= if @payload do %>
+        <% {label, description, accent} = operations_state(@payload) %>
+        <.operations_status label={label} description={description} accent={accent} />
+      <% end %>
 
       <%= if is_nil(@payload) do %>
         <div role="status" aria-busy="true" aria-label="Loading dashboard" class="space-y-4">
@@ -309,6 +314,47 @@ defmodule SymphonyElixirWeb.DashboardLive do
     """
   end
 
+  attr(:label, :string, required: true)
+  attr(:description, :string, required: true)
+  attr(:accent, :string, required: true)
+
+  defp operations_status(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :icon,
+        case assigns.accent do
+          "emerald" -> "hero-check-circle"
+          "amber" -> "hero-exclamation-triangle"
+          "rose" -> "hero-exclamation-triangle"
+          _ -> "hero-pause-circle"
+        end
+      )
+
+    ~H"""
+    <div
+      id="operations-status"
+      role="status"
+      aria-live="polite"
+      class={[
+        "card-elevated flex items-center gap-3 rounded-xl border px-4 py-3",
+        @accent == "emerald" && "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-100",
+        @accent == "amber" && "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100",
+        @accent == "rose" && "border-rose-200 bg-rose-50 text-rose-950 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-100",
+        @accent == "zinc" && "border-border bg-muted/40 text-foreground"
+      ]}
+    >
+      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card/70 ring-1 ring-current/10">
+        <.icon name={@icon} class="h-4 w-4" />
+      </span>
+      <div>
+        <p class="text-sm font-semibold"><%= @label %></p>
+        <p class="text-xs text-muted-foreground"><%= @description %></p>
+      </div>
+    </div>
+    """
+  end
+
   attr(:q, :string, required: true)
   attr(:harness_filter, :string, required: true)
 
@@ -443,11 +489,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp sessions_card(assigns) do
     ~H"""
+    <section aria-labelledby={"#{@kind}-sessions-heading"}>
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <.card_title class="text-[15px] font-semibold"><%= @title %></.card_title>
+            <.card_title id={"#{@kind}-sessions-heading"} class="text-[15px] font-semibold"><%= @title %></.card_title>
             <.card_description class="text-xs"><%= @description %></.card_description>
           </div>
           <span class={[
@@ -465,7 +512,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
             <.empty_state message={@empty} />
           </div>
         <% else %>
-          <div class="overflow-x-auto">
+          <div class="hidden overflow-x-auto md:block">
             <.table>
               <.table_caption class="sr-only"><%= @title %> table</.table_caption>
               <.table_header>
@@ -567,9 +614,33 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </.table_body>
             </.table>
           </div>
+          <div id={"#{@kind}-sessions-mobile"} class="grid gap-3 p-4 md:hidden">
+            <article :for={entry <- @entries} class="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+              <div class="flex items-start justify-between gap-3">
+                <div class="grid gap-1">
+                  <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                  <.link
+                    navigate={"/sessions/#{entry.issue_identifier}"}
+                    class="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    View details <.icon name="hero-arrow-right" class="h-3 w-3" />
+                  </.link>
+                </div>
+                <.state_badge state={entry.state || "Blocked"} />
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <.harness_badge harness={entry.harness} />
+                <span :if={entry.worker_host} class="mono rounded bg-muted px-2 py-1">Host <%= entry.worker_host %></span>
+                <span :if={@kind == :running} class="mono"> <%= format_runtime_and_turns(entry.started_at, entry.turn_count, DateTime.utc_now()) %></span>
+                <span :if={@kind == :blocked} class="mono">Blocked <%= entry.blocked_at || "—" %></span>
+              </div>
+              <p class="mt-3 text-sm"><%= entry.last_message || entry.error || to_string(entry.last_event || "n/a") %></p>
+            </article>
+          </div>
         <% end %>
       </.card_content>
     </.card>
+    </section>
     """
   end
 
@@ -578,11 +649,12 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp retry_card(assigns) do
     ~H"""
+    <section aria-labelledby="retrying-sessions-heading">
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
         <div class="flex items-start justify-between gap-3">
           <div>
-            <.card_title class="text-[15px] font-semibold">Retry queue</.card_title>
+            <.card_title id="retrying-sessions-heading" class="text-[15px] font-semibold">Retry queue</.card_title>
             <.card_description class="text-xs">Issues waiting for the next retry window.</.card_description>
           </div>
           <span class="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground">
@@ -598,7 +670,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
             } />
           </div>
         <% else %>
-          <div class="overflow-x-auto">
+          <div class="hidden overflow-x-auto md:block">
             <.table>
               <.table_caption class="sr-only">Retry queue table</.table_caption>
               <.table_header>
@@ -631,9 +703,32 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </.table_body>
             </.table>
           </div>
+          <div id="retrying-sessions-mobile" class="grid gap-3 p-4 md:hidden">
+            <article :for={entry <- @entries} class="rounded-xl border border-border/70 bg-card p-3 shadow-sm">
+              <div class="flex items-start justify-between gap-3">
+                <div class="grid gap-1">
+                  <.issue_identifier identifier={entry.issue_identifier} url={entry.issue_url} />
+                  <.link
+                    navigate={"/sessions/#{entry.issue_identifier}"}
+                    class="inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    View details <.icon name="hero-arrow-right" class="h-3 w-3" />
+                  </.link>
+                </div>
+                <span class="inline-flex rounded-full bg-muted px-2 py-1 text-xs font-medium">Attempt #<%= entry.attempt %></span>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span class="rounded bg-muted px-2 py-1">Retrying</span>
+                <span :if={entry.worker_host} class="mono rounded bg-muted px-2 py-1">Host <%= entry.worker_host %></span>
+                <span class="mono">Due <%= entry.due_at || "—" %></span>
+              </div>
+              <p class="mt-3 text-sm"><%= entry.error || "—" %></p>
+            </article>
+          </div>
         <% end %>
       </.card_content>
     </.card>
+    </section>
     """
   end
 
@@ -661,6 +756,22 @@ defmodule SymphonyElixirWeb.DashboardLive do
   end
 
   # ---- data / formatting helpers ----
+
+  defp operations_state(payload) do
+    cond do
+      payload[:error] ->
+        {"Unavailable", "Snapshot data cannot be loaded.", "rose"}
+
+      payload.counts.blocked > 0 or payload.counts.retrying > 0 ->
+        {"Attention required", "Blocked or retrying work needs review.", "amber"}
+
+      payload.counts.running > 0 ->
+        {"Operational", "Sessions are actively running.", "emerald"}
+
+      true ->
+        {"Runtime idle", "No sessions are currently active.", "zinc"}
+    end
+  end
 
   defp poll_label(%{checking: true}), do: "checking now…"
 

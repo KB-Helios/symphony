@@ -663,6 +663,110 @@ defmodule SymphonyElixir.ExtensionsTest do
              %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
   end
 
+  test "overview summarizes health and exposes responsive session collections" do
+    orchestrator_name = Module.concat(__MODULE__, :OverviewStatesOrchestrator)
+    snapshot = static_snapshot()
+    [blocked] = snapshot.blocked
+    snapshot = %{snapshot | blocked: [Map.put(blocked, :harness, "prime")]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        },
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+
+    assert has_element?(view, "#operations-status[role='status']", "Attention required")
+    assert has_element?(view, "section[aria-labelledby='running-sessions-heading']")
+    assert has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    assert has_element?(view, "#retrying-sessions-mobile article", "MT-RETRY")
+
+    view |> form("form[phx-change='search']", %{q: "MT-BLOCKED"}) |> render_change()
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+
+    view |> form("form[phx-change='search']", %{q: ""}) |> render_change()
+    view |> form("form[phx-change='filter']", %{harness: "prime"}) |> render_change()
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+  end
+
+  test "overview identifies an idle runtime" do
+    orchestrator_name = Module.concat(__MODULE__, :IdleOverviewOrchestrator)
+    snapshot = %{static_snapshot() | running: [], blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+    assert has_element?(view, "#operations-status[role='status']", "Runtime idle")
+  end
+
+  test "overview reports refresh and rejects unsupported harness selection" do
+    orchestrator_name = Module.concat(__MODULE__, :OverviewControlsOrchestrator)
+
+    assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+
+    File.write!(
+      Workflow.workflow_file_path(),
+      """
+      ---
+      tracker:
+        kind: linear
+        endpoint: https://api.linear.app/graphql
+        api_key: token
+        project_slug: project
+      harness:
+        kind: codex
+      ---
+      You are an agent for this repository.
+      """
+    )
+
+    on_exit(&ensure_workflow_store_running/0)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        },
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+    assert render_click(view, "refresh", %{}) =~ "Refresh requested"
+
+    assert render_change(view, "select_harness", %{"harness" => "prime"}) =~
+             "Harness set to prime"
+
+    assert Config.settings!().harness.kind == "prime"
+    assert render_change(view, "select_harness", %{"harness" => "unsupported"}) =~ "Unknown harness"
+  end
+
   test "dashboard liveview renders and refreshes over pubsub" do
     orchestrator_name = Module.concat(__MODULE__, :DashboardOrchestrator)
     snapshot = static_snapshot()
