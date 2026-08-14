@@ -34,6 +34,16 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
 
     assert deploy =~ "$response = Invoke-RestMethod @request"
     assert deploy =~ "$response -is [Array] -and $response.Count -eq 0"
+
+    # Verify non-empty responses are still surfaced correctly to project.all, project.one, and compose.create
+    assert deploy =~ ~r/\$projects = @\(Invoke-Dokploy -Route "project\.all"/
+    assert deploy =~ ~r/\$projectRecord = Invoke-Dokploy -Route "project\.one\?projectId=/
+    assert deploy =~ ~r/\$compose = Invoke-Dokploy -Route "compose\.create"/
+
+    # Verify that non-empty arrays are still accessible after the empty-array check
+    assert deploy =~ ~r/\$projects \| Where-Object \{ \$_\.name -eq "Symphony" \}/
+    assert deploy =~ ~r/@\(\$projectRecord\.environments\)/
+    assert deploy =~ ~r/if \(\$null -eq \$compose\)/
   end
 
   test "verification checks private health, router responses, volumes, and public refusal" do

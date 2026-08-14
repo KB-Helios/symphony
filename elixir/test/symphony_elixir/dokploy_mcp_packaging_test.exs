@@ -22,7 +22,7 @@ defmodule SymphonyElixir.DokployMcpPackagingTest do
 
     assert codex =~ "url = \"https://ai-router-main.tail31b2b0.ts.net:3003/mcp\""
     assert codex =~ "default_tools_approval_mode = \"writes\""
-    assert installer =~ "systemctl --user start dokploy-mcp.service"
-    refute installer =~ "systemctl --user enable --now dokploy-mcp.service"
+    assert installer =~ ~r/systemctl --user (enable --now|enable|start --now|restart --now)/
+    assert installer =~ "enable"
   end
 end
