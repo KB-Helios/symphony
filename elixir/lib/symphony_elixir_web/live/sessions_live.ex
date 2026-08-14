@@ -13,7 +13,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
   def mount(_params, _session, socket) do
     socket =
       socket
-      |> assign(:payload, load_payload())
+      |> assign(:payload, nil)
       |> assign(:current_path, "/sessions")
       |> assign(:tab, :all)
       |> assign(:sort_by, :identifier)
@@ -21,16 +21,32 @@ defmodule SymphonyElixirWeb.SessionsLive do
       |> assign(:page, 1)
       |> assign(:q, "")
       |> assign(:per_page, @per_page)
-      |> assign(:page_title, "Symphony — Sessions")
+      |> assign(:page_title, "Sessions")
 
-    if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
+    socket =
+      if connected?(socket) do
+        :ok = ObservabilityPubSub.subscribe()
+        start_async(socket, :load_payload, &load_payload/0)
+      else
+        socket
+      end
 
     {:ok, socket}
   end
 
   @impl true
+  def handle_async(:load_payload, {:ok, payload}, socket) do
+    {:noreply, assign(socket, :payload, payload)}
+  end
+
+  def handle_async(:load_payload, {:exit, _reason}, socket) do
+    payload = %{error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}}
+    {:noreply, assign(socket, :payload, payload)}
+  end
+
+  @impl true
   def handle_info(:observability_updated, socket) do
-    {:noreply, assign(socket, :payload, load_payload())}
+    {:noreply, start_async(socket, :load_payload, &load_payload/0)}
   end
 
   @impl true
@@ -94,9 +110,9 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
       <%= if is_nil(@payload) do %>
         <div role="status" aria-busy="true" aria-label="Loading sessions" class="space-y-3">
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
         </div>
       <% else %>
         <%= if @payload[:error] do %>
@@ -147,7 +163,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
               </div>
             </form>
 
-            <div role="tablist" aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
+            <div role="group" aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
               <.tab_button tab={@tab} value={:all} count={total(@payload)} icon="hero-squares-2x2" label="All" />
               <.tab_button
                 tab={@tab}
@@ -173,7 +189,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
             </div>
           </div>
 
-          <.card_content class="p-0" role="tabpanel" id="sessions-table-panel">
+          <.card_content class="p-0" id="sessions-panel">
             <%= if total(@payload) == 0 do %>
               <div class="p-6">
                 <.empty_state
@@ -197,7 +213,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   />
                 </div>
               <% else %>
-                <div class="overflow-x-auto">
+                <div id="sessions-desktop" class="hidden overflow-x-auto md:block">
                   <.table aria-busy="false">
                       <.table_caption class="sr-only">Sessions table</.table_caption>
                     <.table_header>
@@ -272,6 +288,65 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   </.table>
                 </div>
 
+                <div id="sessions-mobile" class="divide-y divide-border/60 md:hidden">
+                  <div id="sessions-mobile-sort" role="group" aria-label="Sort sessions" class="flex items-center gap-2 p-4">
+                    <span class="text-xs font-medium text-muted-foreground">Sort by</span>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="identifier"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :identifier, "issue")}"}
+                      aria-pressed={to_string(@sort_by == :identifier)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      Issue
+                    </button>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="status"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :status, "status")}"}
+                      aria-pressed={to_string(@sort_by == :status)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      Status
+                    </button>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="state"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :state, "state")}"}
+                      aria-pressed={to_string(@sort_by == :state)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      State
+                    </button>
+                  </div>
+                  <article :for={row <- paginated} class="space-y-3 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <.link navigate={~p"/sessions/#{row.identifier}"} class="font-semibold tracking-tight">
+                        <%= row.identifier %>
+                      </.link>
+                      <.status_badge status={row.status} />
+                    </div>
+                    <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      <div>
+                        <dt class="text-xs text-muted-foreground">State</dt>
+                        <dd class="mt-1"><%= row.state || "—" %></dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-muted-foreground">Harness</dt>
+                        <dd class="mt-1"><%= row.harness || "—" %></dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-muted-foreground">Host</dt>
+                        <dd class="mono mt-1 text-xs"><%= row.worker_host || "local" %></dd>
+                      </div>
+                      <div class="col-span-2">
+                        <dt class="text-xs text-muted-foreground">Latest activity</dt>
+                        <dd class="mt-1 break-words text-muted-foreground"><%= row.detail %></dd>
+                      </div>
+                    </dl>
+                  </article>
+                </div>
+
                 <div class="flex flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <span class="text-xs text-muted-foreground">
                     Showing <%= showing_range(current_page, @per_page, total_filtered) %> of <%= total_filtered %>
@@ -344,9 +419,8 @@ defmodule SymphonyElixirWeb.SessionsLive do
   defp tab_button(assigns) do
     ~H"""
     <button
-      role="tab"
-      aria-selected={to_string(@tab == @value)}
-      aria-controls="sessions-table-panel"
+      id={"sessions-tab-#{@value}"}
+      aria-pressed={to_string(@tab == @value)}
       phx-click="switch_tab"
       phx-value-tab={@value}
       class={[
@@ -479,6 +553,13 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   defp aria_sort(_current_by, _current_dir, _column), do: "none"
+
+  defp sort_label(current_by, current_dir, column, label) do
+    case aria_sort(current_by, current_dir, column) do
+      "none" -> label
+      direction -> "#{label}, #{direction}"
+    end
+  end
 
   defp parse_tab(tab) when is_binary(tab) do
     case String.downcase(String.trim(tab)) do

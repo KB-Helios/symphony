@@ -42,7 +42,8 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
-  @spec issue_payload(String.t(), GenServer.name(), timeout()) :: {:ok, map()} | {:error, :issue_not_found}
+  @spec issue_payload(String.t(), GenServer.name(), timeout()) ::
+          {:ok, map()} | {:error, :issue_not_found | :snapshot_timeout | :snapshot_unavailable}
   def issue_payload(issue_identifier, orchestrator, snapshot_timeout_ms) when is_binary(issue_identifier) do
     case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
       %{} = snapshot ->
@@ -56,8 +57,11 @@ defmodule SymphonyElixirWeb.Presenter do
           {:ok, issue_payload_body(issue_identifier, running, retry, blocked)}
         end
 
-      _ ->
-        {:error, :issue_not_found}
+      :timeout ->
+        {:error, :snapshot_timeout}
+
+      :unavailable ->
+        {:error, :snapshot_unavailable}
     end
   end
 

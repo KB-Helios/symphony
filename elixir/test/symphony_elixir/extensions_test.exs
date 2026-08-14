@@ -51,7 +51,18 @@ defmodule SymphonyElixir.ExtensionsTest do
     def init(opts), do: {:ok, opts}
 
     def handle_call(:snapshot, _from, state) do
-      {:reply, Keyword.fetch!(state, :snapshot), state}
+      {snapshot, state} =
+        case Keyword.get(state, :snapshots, []) do
+          [snapshot | rest] -> {snapshot, Keyword.put(state, :snapshots, rest)}
+          [] -> {Keyword.fetch!(state, :snapshot), state}
+        end
+
+      if notify = Keyword.get(state, :notify) do
+        send(notify, {:snapshot_started, snapshot.running |> hd() |> Map.fetch!(:identifier)})
+      end
+
+      Process.sleep(Keyword.get(state, :delay_ms, 0))
+      {:reply, snapshot, state}
     end
 
     def handle_call(:request_refresh, _from, state) do
@@ -432,8 +443,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert json_response(post(build_conn(), "/api/v1/MT-1", %{}), 405) ==
              %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
 
-    assert json_response(get(build_conn(), "/unknown"), 404) ==
-             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
+    assert html_response(get(build_conn(), "/unknown"), 404) =~ "Page not found"
 
     state_payload = json_response(get(build_conn(), "/api/v1/state"), 503)
 
@@ -494,11 +504,503 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
     assert Plug.Conn.get_resp_header(favicon_conn, "content-type") == ["image/png"]
 
-    assert json_response(get(build_conn(), "/dashboard.css"), 404) ==
-             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
+    assert html_response(get(build_conn(), "/dashboard.css"), 404) =~ "Page not found"
+    assert html_response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 404) =~ "Page not found"
+  end
 
-    assert json_response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 404) ==
+  test "shared shell exposes keyboard navigation and route state" do
+    orchestrator_name = Module.concat(__MODULE__, :ShellOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, overview, html} = live(build_conn(), "/")
+    render_async(overview)
+    assert html =~ ~s(id="skip-to-content" href="#main-content")
+    assert has_element?(overview, "main#main-content[tabindex='-1']")
+    assert has_element?(overview, "nav[aria-label='Primary'] a[aria-current='page'][href='/']")
+
+    {:ok, sessions, _html} = live(build_conn(), "/sessions")
+    render_async(sessions)
+
+    assert has_element?(
+             sessions,
+             "nav[aria-label='Primary'] a[aria-current='page'][href='/sessions']"
+           )
+
+    assert length(Floki.find(Floki.parse_document!(render(sessions)), "nav[aria-label='Primary']")) == 2
+    assert has_element?(sessions, "div.ml-auto > #connection-status")
+    assert has_element?(sessions, "#connection-status", "Live")
+    assert has_element?(sessions, "#connection-status", "Offline")
+  end
+
+  test "overview and sessions render loading states while their snapshots load" do
+    orchestrator_name = Module.concat(__MODULE__, :LoadingOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        delay_ms: 50,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 100)
+
+    {:ok, overview, overview_html} = live(build_conn(), "/")
+    assert overview_html =~ ~s(aria-label="Loading dashboard")
+    assert render_async(overview, 200) =~ "MT-HTTP"
+
+    {:ok, sessions, sessions_html} = live(build_conn(), "/sessions")
+    assert sessions_html =~ ~s(aria-label="Loading sessions")
+    assert render_async(sessions, 200) =~ "MT-HTTP"
+  end
+
+  test "overview and sessions keep the newest snapshot when refresh overlaps initial load" do
+    Enum.each([{DashboardLive, "/"}, {SessionsLive, "/sessions"}], fn {live_view, path} ->
+      orchestrator_name = Module.concat(__MODULE__, live_view)
+      old_snapshot = snapshot_with_identifier("MT-OLD")
+      new_snapshot = snapshot_with_identifier("MT-NEW")
+
+      {:ok, _pid} =
+        StaticOrchestrator.start_link(
+          name: orchestrator_name,
+          snapshot: new_snapshot,
+          snapshots: [old_snapshot, new_snapshot],
+          delay_ms: 50,
+          notify: self(),
+          health: %{ready?: true}
+        )
+
+      start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 200)
+
+      {:ok, view, _html} = live(build_conn(), path)
+      assert_receive {:snapshot_started, "MT-OLD"}
+      StatusDashboard.notify_update()
+
+      html = render_async(view, 500)
+      assert html =~ "MT-NEW"
+      refute html =~ "MT-OLD"
+
+      stop_supervised!(SymphonyElixirWeb.Endpoint)
+    end)
+  end
+
+  test "session detail exposes labelled operational sections" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailOrchestrator)
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+    snapshot = %{snapshot | running: [Map.put(running, :workspace_path, "/workspaces/MT-HTTP")]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions/MT-HTTP")
+
+    assert has_element?(view, "section[aria-labelledby='session-summary-heading']", "MT-HTTP")
+    assert has_element?(view, "section[aria-labelledby='workspace-heading']", "/workspaces/MT-HTTP")
+    assert has_element?(view, "section[aria-labelledby='running-session-heading']", "thread-http")
+    assert has_element?(view, "section[aria-labelledby='recent-events-heading']")
+    assert has_element?(view, "button[phx-hook='ClipboardCopy'][data-copy='/workspaces/MT-HTTP']")
+    assert has_element?(view, "a[href='https://example.org/issues/MT-HTTP']")
+
+    assert html_response(get(build_conn(), "/sessions/MT-HTTP"), 200) =~
+             ~r/<title[^>]*>\s*MT-HTTP\s*·\s*Symphony\s*<\/title>/
+  end
+
+  test "session detail handles unknown and unsafe issue targets" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailSafetyOrchestrator)
+
+    snapshot =
+      put_in(static_snapshot().running, [
+        %{hd(static_snapshot().running) | issue_url: "javascript:alert('nope')"}
+      ])
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, unsafe_view, _html} = live(build_conn(), "/sessions/MT-HTTP")
+    refute has_element?(unsafe_view, "a[href^='javascript:']")
+
+    {:ok, missing_view, html} = live(build_conn(), "/sessions/MT-MISSING")
+    assert html =~ "Issue not found"
+    assert has_element?(missing_view, "a[href='/sessions']", "View all sessions")
+
+    assert html_response(get(build_conn(), "/sessions/MT-MISSING"), 200) =~
+             ~r/<title[^>]*>\s*Issue not found\s*·\s*Symphony\s*<\/title>/
+  end
+
+  test "session detail distinguishes missing issues from unavailable snapshots" do
+    unavailable_name = Module.concat(__MODULE__, :UnavailableDetailOrchestrator)
+    start_test_endpoint(orchestrator: unavailable_name, snapshot_timeout_ms: 5)
+
+    {:ok, unavailable_view, unavailable_html} = live(build_conn(), "/sessions/MT-UNKNOWN")
+    assert unavailable_html =~ "Session data unavailable"
+    assert has_element?(unavailable_view, "a[href='/sessions']", "View all sessions")
+    refute unavailable_html =~ "is not currently tracked"
+
+    assert json_response(get(build_conn(), "/api/v1/MT-UNKNOWN"), 503) == %{
+             "error" => %{
+               "code" => "snapshot_unavailable",
+               "message" => "Snapshot unavailable"
+             }
+           }
+
+    stop_supervised!(SymphonyElixirWeb.Endpoint)
+
+    timeout_name = Module.concat(__MODULE__, :TimeoutDetailOrchestrator)
+    {:ok, _pid} = SlowOrchestrator.start_link(name: timeout_name)
+    start_test_endpoint(orchestrator: timeout_name, snapshot_timeout_ms: 1)
+
+    {:ok, _timeout_view, timeout_html} = live(build_conn(), "/sessions/MT-UNKNOWN")
+    assert timeout_html =~ "Session data unavailable"
+    assert timeout_html =~ "Snapshot timed out"
+
+    assert json_response(get(build_conn(), "/api/v1/MT-UNKNOWN"), 504) == %{
+             "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"}
+           }
+  end
+
+  test "session detail bounds long identifiers in found and not-found states" do
+    orchestrator_name = Module.concat(__MODULE__, :LongIdentifierOrchestrator)
+    identifier = String.duplicate("A", 256)
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+    snapshot = %{snapshot | running: [%{running | identifier: identifier}]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, found_view, _html} = live(build_conn(), "/sessions/#{identifier}")
+    assert has_element?(found_view, "#session-summary-heading.break-all", identifier)
+
+    missing_identifier = "MISSING-#{identifier}"
+    {:ok, missing_view, _html} = live(build_conn(), "/sessions/#{missing_identifier}")
+    assert has_element?(missing_view, ".mono.break-all", missing_identifier)
+  end
+
+  test "session detail shows only its backing blocked or retry context" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailContextOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, blocked_view, _html} = live(build_conn(), "/sessions/MT-BLOCKED")
+    assert has_element?(blocked_view, "section[aria-labelledby='blocked-context-heading']")
+    refute has_element?(blocked_view, "section[aria-labelledby='retry-context-heading']")
+    refute has_element?(blocked_view, "section[aria-labelledby='running-session-heading']")
+
+    {:ok, retry_view, _html} = live(build_conn(), "/sessions/MT-RETRY")
+    assert has_element?(retry_view, "section[aria-labelledby='retry-context-heading']")
+    refute has_element?(retry_view, "section[aria-labelledby='blocked-context-heading']")
+    refute has_element?(retry_view, "section[aria-labelledby='running-session-heading']")
+    assert has_element?(retry_view, "section[aria-labelledby='recent-events-heading']", "No events recorded yet.")
+  end
+
+  test "sessions exposes equivalent desktop and mobile collections" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/sessions")
+
+    assert has_element?(view, "#sessions-desktop table", "MT-HTTP")
+    assert has_element?(view, "#sessions-mobile article", "MT-HTTP")
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    assert has_element?(view, "#sessions-mobile article", "MT-RETRY")
+
+    view |> form("form[phx-change='search']", %{q: "MT-BLOCKED"}) |> render_change()
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#sessions-mobile article", "MT-HTTP")
+  end
+
+  test "sessions filters and sorts through accessible controls" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsControlsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/sessions")
+    view |> element("#sessions-tab-blocked") |> render_click()
+
+    assert has_element?(view, "#sessions-tab-blocked[aria-pressed='true']")
+    assert has_element?(view, "[role='group'][aria-label='Filter sessions by status']")
+    refute has_element?(view, "[role='tablist']")
+    refute has_element?(view, "[role='tab']")
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#sessions-mobile article", "MT-HTTP")
+
+    view |> element("#sessions-mobile-sort button[phx-value-sort='status']") |> render_click()
+    assert has_element?(view, "#sessions-mobile-sort[aria-label='Sort sessions']")
+    assert has_element?(view, "#sessions-mobile-sort button[phx-value-sort='status'][aria-pressed='true']")
+    assert has_element?(view, "#sessions-mobile-sort button[aria-label='Sort sessions by status, ascending']")
+    assert has_element?(view, "th[aria-sort='ascending'] button[phx-value-sort='status']")
+  end
+
+  test "sessions mobile card links navigate to the session detail" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsMobileLinkOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/sessions")
+    view |> element("#sessions-mobile a[href='/sessions/MT-HTTP']", "MT-HTTP") |> render_click()
+    assert_redirect(view, "/sessions/MT-HTTP")
+  end
+
+  test "sessions paginates the same rows on mobile" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsPaginationOrchestrator)
+    snapshot = static_snapshot()
+    template = hd(snapshot.running)
+
+    running =
+      for number <- 1..11 do
+        suffix = number |> Integer.to_string() |> String.pad_leading(2, "0")
+
+        %{template | issue_id: "issue-#{suffix}", identifier: "MT-#{suffix}", session_id: "thread-#{suffix}"}
+      end
+
+    snapshot = %{snapshot | running: running, blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/sessions")
+    assert has_element?(view, "#sessions-mobile article", "MT-01")
+    refute has_element?(view, "#sessions-mobile article", "MT-11")
+
+    view |> element("button[aria-label='Next page']") |> render_click()
+    assert has_element?(view, "#sessions-mobile article", "MT-11")
+    refute has_element?(view, "#sessions-mobile article", "MT-01")
+  end
+
+  test "sessions distinguishes idle and unavailable snapshots" do
+    empty_name = Module.concat(__MODULE__, :EmptySessionsOrchestrator)
+    empty = %{static_snapshot() | running: [], blocked: [], retrying: []}
+    {:ok, _pid} = StaticOrchestrator.start_link(name: empty_name, snapshot: empty, health: %{ready?: true})
+    start_test_endpoint(orchestrator: empty_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, empty_html} = live_and_wait("/sessions")
+    assert empty_html =~ "No sessions yet"
+
+    stop_supervised!(SymphonyElixirWeb.Endpoint)
+    missing_name = Module.concat(__MODULE__, :MissingSessionsOrchestrator)
+    start_test_endpoint(orchestrator: missing_name, snapshot_timeout_ms: 5)
+
+    {:ok, _view, unavailable_html} = live_and_wait("/sessions")
+    assert unavailable_html =~ "Snapshot unavailable"
+  end
+
+  test "browser fallback is HTML while unknown API routes stay JSON" do
+    orchestrator_name = Module.concat(__MODULE__, :FallbackOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    conn = get(build_conn(), "/missing-page")
+    html = html_response(conn, 404)
+    assert html =~ "Page not found"
+    assert html =~ ~s(id="skip-to-content")
+    assert html =~ ~s(href="/sessions")
+    assert html =~ "View sessions"
+    assert html =~ ~s(id="connection-status")
+    assert html =~ "Offline"
+    refute html =~ ~s(aria-current="page")
+
+    assert json_response(get(build_conn(), "/api/v1/missing/path"), 404) ==
              %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
+  end
+
+  test "overview summarizes health and exposes responsive session collections" do
+    orchestrator_name = Module.concat(__MODULE__, :OverviewStatesOrchestrator)
+    snapshot = static_snapshot()
+    [blocked] = snapshot.blocked
+    snapshot = %{snapshot | blocked: [Map.put(blocked, :harness, "prime")]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        },
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/")
+
+    assert has_element?(view, "#operations-status[role='status']", "Attention required")
+    assert has_element?(view, "section[aria-labelledby='running-sessions-heading']")
+    assert has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    assert has_element?(view, "#retrying-sessions-mobile article", "MT-RETRY")
+
+    assert has_element?(
+             view,
+             "#running-sessions-mobile button[aria-label='Copy session ID for MT-HTTP']",
+             "Copy ID"
+           )
+
+    assert has_element?(
+             view,
+             "#blocked-sessions-mobile button[aria-label='Copy session ID for MT-BLOCKED']",
+             "Copy ID"
+           )
+
+    view |> form("form[phx-change='search']", %{q: "MT-BLOCKED"}) |> render_change()
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+
+    view |> form("form[phx-change='search']", %{q: ""}) |> render_change()
+    view |> form("form[phx-change='filter']", %{harness: "prime"}) |> render_change()
+    assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
+  end
+
+  test "overview identifies an idle runtime" do
+    orchestrator_name = Module.concat(__MODULE__, :IdleOverviewOrchestrator)
+    snapshot = %{static_snapshot() | running: [], blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/")
+    assert has_element?(view, "#operations-status[role='status']", "Runtime idle")
+  end
+
+  test "overview identifies an operational runtime when sessions are running" do
+    orchestrator_name = Module.concat(__MODULE__, :OperationalOverviewOrchestrator)
+    snapshot = %{static_snapshot() | blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/")
+    assert has_element?(view, "#operations-status[role='status']", "Operational")
+  end
+
+  test "overview reports refresh and rejects unsupported harness selection" do
+    orchestrator_name = Module.concat(__MODULE__, :OverviewControlsOrchestrator)
+
+    with_workflow_backup(fn ->
+      File.write!(
+        Workflow.workflow_file_path(),
+        """
+        ---
+        tracker:
+          kind: linear
+          endpoint: https://api.linear.app/graphql
+          api_key: token
+          project_slug: project
+        harness:
+          kind: codex
+        ---
+        You are an agent for this repository.
+        """
+      )
+    end)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        refresh: %{
+          queued: true,
+          coalesced: false,
+          requested_at: DateTime.utc_now(),
+          operations: ["poll"]
+        },
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live_and_wait("/")
+    assert render_click(view, "refresh", %{}) =~ "Refresh requested"
+
+    assert render_change(view, "select_harness", %{"harness" => "prime"}) =~
+             "Harness set to prime"
+
+    assert Config.settings!().harness.kind == "prime"
+    assert render_change(view, "select_harness", %{"harness" => "unsupported"}) =~ "Unknown harness"
   end
 
   test "dashboard liveview renders and refreshes over pubsub" do
@@ -519,7 +1021,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live_and_wait("/")
     assert html =~ "Operations"
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
@@ -586,7 +1088,8 @@ defmodule SymphonyElixir.ExtensionsTest do
       snapshot_timeout_ms: 5
     )
 
-    {:ok, _view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live_and_wait("/")
+    assert has_element?(view, "#operations-status[role='status']", "Unavailable")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
   end
@@ -633,11 +1136,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 404
-    assert dashboard_css.body["error"]["code"] == "not_found"
+    assert dashboard_css.body =~ "Page not found"
 
     phoenix_js = Req.get!("http://127.0.0.1:#{port}/vendor/phoenix/phoenix.js")
     assert phoenix_js.status == 404
-    assert phoenix_js.body["error"]["code"] == "not_found"
+    assert phoenix_js.body =~ "Page not found"
 
     refresh_response =
       Req.post!("http://127.0.0.1:#{port}/api/v1/refresh",
@@ -669,6 +1172,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
+  end
+
+  defp live_and_wait(path) do
+    {:ok, view, _html} = live(build_conn(), path)
+    {:ok, view, render_async(view)}
   end
 
   defp static_snapshot do
@@ -724,6 +1232,18 @@ defmodule SymphonyElixir.ExtensionsTest do
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}},
       polling: %{checking?: false, next_poll_in_ms: 30_000, poll_interval_ms: 30_000}
+    }
+  end
+
+  defp snapshot_with_identifier(identifier) do
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+
+    %{
+      snapshot
+      | running: [%{running | identifier: identifier}],
+        blocked: [],
+        retrying: []
     }
   end
 

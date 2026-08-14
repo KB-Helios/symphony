@@ -9,8 +9,8 @@ defmodule SymphonyElixirWeb.Layouts do
   def root(assigns) do
     assigns =
       assigns
-      |> assign_new(:csrf_token, fn -> Plug.CSRFProtection.get_csrf_token() end)
-      |> assign_new(:page_title, fn -> "Symphony — Observability" end)
+      |> Map.put_new(:csrf_token, Plug.CSRFProtection.get_csrf_token())
+      |> Map.put_new(:page_title, nil)
 
     ~H"""
     <!DOCTYPE html>
@@ -20,13 +20,9 @@ defmodule SymphonyElixirWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={@csrf_token} />
         <meta name="color-scheme" content="light dark" />
-        <title>{@page_title}</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
-          rel="stylesheet"
-        />
+        <Phoenix.Component.live_title default="Observability" suffix=" · Symphony">
+          {@page_title}
+        </Phoenix.Component.live_title>
         <link rel="icon" type="image/png" sizes="128x128" phx-track-static href={~p"/favicon.png"} />
         <link rel="stylesheet" href={~p"/assets/app.css"} />
         <script>
@@ -44,6 +40,13 @@ defmodule SymphonyElixirWeb.Layouts do
         <script defer phx-track-static src={~p"/assets/app.js"}></script>
       </head>
       <body class="h-full bg-background text-foreground antialiased">
+        <a
+          id="skip-to-content"
+          href="#main-content"
+          class="sr-only fixed left-4 top-4 z-[100] rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground focus:not-sr-only"
+        >
+          Skip to content
+        </a>
         {@inner_content}
       </body>
     </html>
@@ -52,8 +55,13 @@ defmodule SymphonyElixirWeb.Layouts do
 
   @spec app(map()) :: Phoenix.LiveView.Rendered.t()
   def app(assigns) do
-    current = assigns[:current_path] || "/"
-    assigns = assign(assigns, :current, current)
+    current = Map.get(assigns, :current_path, "/")
+
+    assigns =
+      assigns
+      |> Map.put_new(:inner_content, nil)
+      |> Map.put_new(:inner_block, [])
+      |> assign(:current, current)
 
     ~H"""
     <div class="flex min-h-screen">
@@ -68,7 +76,7 @@ defmodule SymphonyElixirWeb.Layouts do
           </div>
         </div>
 
-        <nav class="flex-1 space-y-1 px-3 py-5">
+        <nav class="flex-1 space-y-1 px-3 py-5" aria-label="Primary">
           <p class="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/80">
             Navigate
           </p>
@@ -109,26 +117,25 @@ defmodule SymphonyElixirWeb.Layouts do
             <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
               S
             </span>
-            <span class="text-sm font-semibold tracking-tight">Symphony</span>
+            <span class="hidden text-sm font-semibold tracking-tight sm:inline">Symphony</span>
             <nav class="ml-1 flex items-center gap-1 md:hidden" aria-label="Primary">
               <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
               <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
             </nav>
           </div>
-          <nav class="hidden items-center gap-1 md:flex">
-            <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
-            <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
-          </nav>
-          <div class="flex items-center gap-2">
-            <span class="hidden items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs font-medium shadow-sm sm:inline-flex">
+          <div class="ml-auto flex items-center gap-2">
+            <span
+              id="connection-status"
+              class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-2.5 py-1.5 text-xs font-medium shadow-sm sm:px-3"
+            >
               <span class="relative flex h-2 w-2">
-                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 [data-phx-main:not(.phx-connected)_&]:hidden">
+                <span class="absolute hidden h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:phx-connected:animate-ping phx-connected:inline-flex">
                 </span>
-                <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 [data-phx-main:not(.phx-connected)_&]:bg-muted-foreground">
+                <span class="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground phx-connected:bg-emerald-500">
                 </span>
               </span>
-              <span class="[data-phx-main:not(.phx-connected)_&]:hidden">Live</span>
-              <span class="hidden [data-phx-main:not(.phx-connected)_&]:inline">Offline</span>
+              <span class="hidden phx-connected:inline">Live</span>
+              <span class="phx-connected:hidden">Offline</span>
             </span>
             <button
               type="button"
@@ -143,8 +150,12 @@ defmodule SymphonyElixirWeb.Layouts do
           </div>
         </div>
 
-        <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-          {@inner_content}
+        <main id="main-content" tabindex="-1" class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+          <%= if @inner_content do %>
+            {@inner_content}
+          <% else %>
+            {render_slot(@inner_block)}
+          <% end %>
         </main>
 
         <footer class="border-t border-border/60 px-4 py-6 text-xs text-muted-foreground sm:px-6 lg:px-8">
@@ -161,13 +172,13 @@ defmodule SymphonyElixirWeb.Layouts do
   end
 
   attr(:href, :string, required: true)
-  attr(:current, :string, required: true)
+  attr(:current, :any, required: true)
   slot(:inner_block, required: true)
 
   defp top_nav_link(assigns) do
     href = assigns.href
     current = assigns.current
-    active = current == href || (href == "/sessions" && String.starts_with?(current, "/sessions"))
+    active = current == href || (href == "/sessions" && is_binary(current) && String.starts_with?(current, "/sessions"))
     assigns = assign(assigns, :active, active)
 
     ~H"""
@@ -194,14 +205,14 @@ defmodule SymphonyElixirWeb.Layouts do
   end
 
   attr(:href, :string, required: true)
-  attr(:current, :string, required: true)
+  attr(:current, :any, required: true)
   attr(:icon, :string, required: true)
   slot(:inner_block, required: true)
 
   defp nav_link(assigns) do
     href = assigns.href
     current = assigns.current
-    active = current == href || (href == "/sessions" && String.starts_with?(current, "/sessions"))
+    active = current == href || (href == "/sessions" && is_binary(current) && String.starts_with?(current, "/sessions"))
     assigns = assign(assigns, :active, active)
 
     ~H"""
