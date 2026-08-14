@@ -398,6 +398,10 @@ The observability UI runs on a minimal Phoenix stack:
 - Static assets are compiled by Tailwind and esbuild into `priv/static/assets` (`mix assets.build`)
   and served via `Plug.Static`; there is no separate embedded asset layer
 - Tracker issue identifiers link to the tracker-provided URL when it uses `http` or `https`
+- The shared operator shell provides responsive desktop/mobile navigation, theme controls, and connection state.
+- Overview and session collections use tables on wider screens and equivalent cards on narrow screens.
+- Loading, idle, filtered-empty, unavailable, unknown-session, and unknown-browser-route states remain inside the operator UI.
+- Unknown `/api/*` routes continue to return JSON errors.
 
 ## Project Layout
 
