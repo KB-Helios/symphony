@@ -5,7 +5,6 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
 
   use SymphonyElixirWeb, :live_view
 
-  alias Phoenix.LiveView.JS
   alias SymphonyElixirWeb.{ObservabilityPubSub, Presenter}
 
   @impl true
@@ -15,7 +14,7 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
       |> assign(:identifier, identifier)
       |> assign(:current_path, "/sessions")
       |> assign(:result, load_issue(identifier))
-      |> assign(:page_title, "Symphony — #{identifier}")
+      |> assign(:page_title, identifier)
 
     if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
 
@@ -47,14 +46,9 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
                 <span class="mono rounded bg-muted px-1.5 py-0.5 text-xs"><%= @identifier %></span>
                 is not currently tracked by the runtime.
               </p>
-              <.button
-                variant="outline"
-                size="sm"
-                class="mt-5 rounded-full"
-                phx-click={JS.navigate("/sessions")}
-              >
+              <.pill_link navigate="/sessions" class="mt-5">
                 View all sessions
-              </.button>
+              </.pill_link>
             </.card_content>
           </.card>
       <% end %>
@@ -67,72 +61,75 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
 
   defp issue_detail(assigns) do
     ~H"""
-    <.header>
-      <span class="mono text-[22px] tracking-tight"><%= @identifier %></span>
-      <:subtitle>
-        <span class="inline-flex flex-wrap items-center gap-2">
-          <.status_badge status={@issue.status} />
-          <span class="text-xs text-muted-foreground">Workspace · <%= @issue.workspace.path %></span>
-        </span>
-      </:subtitle>
-      <:actions>
-        <.harness_badge harness={harness(@issue)} />
-        <.pill_link
-          :if={external_issue_url(issue_url(@issue))}
-          href={external_issue_url(issue_url(@issue))}
-          target="_blank"
-          rel="noopener noreferrer"
-          icon_right="hero-arrow-top-right-on-square"
-        >
-          Open in tracker<span class="sr-only"> (opens in new tab)</span>
-        </.pill_link>
-      </:actions>
-    </.header>
+    <section aria-labelledby="session-summary-heading">
+      <.header>
+        <span id="session-summary-heading" class="mono text-[22px] tracking-tight"><%= @identifier %></span>
+        <:subtitle>
+          <span class="inline-flex flex-wrap items-center gap-2">
+            <.status_badge status={@issue.status} />
+            <span class="break-all text-xs text-muted-foreground">Workspace · <%= @issue.workspace.path %></span>
+          </span>
+        </:subtitle>
+        <:actions>
+          <.harness_badge harness={harness(@issue)} />
+          <.pill_link
+            :if={external_issue_url(issue_url(@issue))}
+            href={external_issue_url(issue_url(@issue))}
+            target="_blank"
+            rel="noopener noreferrer"
+            icon_right="hero-arrow-top-right-on-square"
+          >
+            Open in tracker<span class="sr-only"> (opens in new tab)</span>
+          </.pill_link>
+        </:actions>
+      </.header>
 
-    <div class="grid gap-4 sm:grid-cols-3">
-      <.card class="card-elevated">
-        <.card_header class="pb-2">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status</p>
-        </.card_header>
-        <.card_content>
-          <p class="text-[20px] font-semibold capitalize tracking-tight"><%= @issue.status %></p>
-          <p class="mt-1 text-xs text-muted-foreground">Current orchestration state</p>
-        </.card_content>
-      </.card>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <.card class="card-elevated">
+          <.card_header class="pb-2">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status</p>
+          </.card_header>
+          <.card_content>
+            <p class="text-[20px] font-semibold capitalize tracking-tight"><%= @issue.status %></p>
+            <p class="mt-1 text-xs text-muted-foreground">Current orchestration state</p>
+          </.card_content>
+        </.card>
 
-      <.card class="card-elevated">
-        <.card_header class="pb-2">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Attempts</p>
-        </.card_header>
-        <.card_content>
-          <p class="numeric text-[20px] font-semibold tracking-tight"><%= @issue.attempts.current_retry_attempt %></p>
-          <p class="mt-1 text-xs text-muted-foreground">
-            <%= @issue.attempts.restart_count %> restart(s) · retry window
-          </p>
-        </.card_content>
-      </.card>
+        <.card class="card-elevated">
+          <.card_header class="pb-2">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Attempts</p>
+          </.card_header>
+          <.card_content>
+            <p class="numeric text-[20px] font-semibold tracking-tight"><%= @issue.attempts.current_retry_attempt %></p>
+            <p class="mt-1 text-xs text-muted-foreground">
+              <%= @issue.attempts.restart_count %> restart(s) · retry window
+            </p>
+          </.card_content>
+        </.card>
 
-      <.card class="card-elevated">
-        <.card_header class="pb-2">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Harness</p>
-        </.card_header>
-        <.card_content>
-          <p class="text-[20px] font-semibold tracking-tight"><%= harness(@issue) %></p>
-          <p class="mt-1 text-xs text-muted-foreground">Agent executing this issue</p>
-        </.card_content>
-      </.card>
-    </div>
+        <.card class="card-elevated">
+          <.card_header class="pb-2">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Harness</p>
+          </.card_header>
+          <.card_content>
+            <p class="text-[20px] font-semibold tracking-tight"><%= harness(@issue) %></p>
+            <p class="mt-1 text-xs text-muted-foreground">Agent executing this issue</p>
+          </.card_content>
+        </.card>
+      </div>
+    </section>
 
+    <section aria-labelledby="workspace-heading">
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
-        <.card_title class="text-[15px] font-semibold">Workspace</.card_title>
+        <.card_title id="workspace-heading" class="text-[15px] font-semibold">Workspace</.card_title>
         <.card_description class="text-xs">Where the agent operates for this issue.</.card_description>
       </.card_header>
       <.card_content class="space-y-3 p-6">
         <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:items-baseline">
           <p class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Path</p>
           <div class="flex flex-wrap items-center gap-2">
-            <p class="mono break-words text-xs leading-relaxed"><%= @issue.workspace.path %></p>
+            <p class="mono break-all text-xs leading-relaxed"><%= @issue.workspace.path %></p>
             <.button
               variant="outline"
               size="sm"
@@ -151,10 +148,12 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         <.detail_row :if={@issue.last_error} label="Last error" value={@issue.last_error} />
       </.card_content>
     </.card>
+    </section>
 
-    <.card :if={@issue.blocked} class="card-elevated overflow-hidden">
+    <section :if={@issue.blocked} aria-labelledby="blocked-context-heading">
+    <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
-        <.card_title class="text-[15px] font-semibold">Blocked context</.card_title>
+        <.card_title id="blocked-context-heading" class="text-[15px] font-semibold">Blocked context</.card_title>
         <.card_description class="text-xs">Waiting for operator input.</.card_description>
       </.card_header>
       <.card_content class="space-y-3 p-6">
@@ -164,10 +163,12 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         <.detail_row :if={@issue.blocked.state} label="State" value={@issue.blocked.state} />
       </.card_content>
     </.card>
+    </section>
 
-    <.card :if={@issue.retry} class="card-elevated overflow-hidden">
+    <section :if={@issue.retry} aria-labelledby="retry-context-heading">
+    <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
-        <.card_title class="text-[15px] font-semibold">Retry context</.card_title>
+        <.card_title id="retry-context-heading" class="text-[15px] font-semibold">Retry context</.card_title>
         <.card_description class="text-xs">Backing off before the next attempt.</.card_description>
       </.card_header>
       <.card_content class="space-y-3 p-6">
@@ -176,10 +177,12 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         <.detail_row label="Error" value={@issue.retry.error || "—"} />
       </.card_content>
     </.card>
+    </section>
 
-    <.card :if={@issue.running} class="card-elevated overflow-hidden">
+    <section :if={@issue.running} aria-labelledby="running-session-heading">
+    <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
-        <.card_title class="text-[15px] font-semibold">Running session</.card_title>
+        <.card_title id="running-session-heading" class="text-[15px] font-semibold">Running session</.card_title>
         <.card_description class="text-xs">Live agent activity and token usage.</.card_description>
       </.card_header>
       <.card_content class="space-y-4 p-6">
@@ -210,10 +213,12 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
         </div>
       </.card_content>
     </.card>
+    </section>
 
+    <section aria-labelledby="recent-events-heading">
     <.card class="card-elevated overflow-hidden">
       <.card_header class="border-b border-border/60 bg-muted/20">
-        <.card_title class="text-[15px] font-semibold">Recent events</.card_title>
+        <.card_title id="recent-events-heading" class="text-[15px] font-semibold">Recent events</.card_title>
         <.card_description class="text-xs">Latest agent events for this issue.</.card_description>
       </.card_header>
       <.card_content class="p-0">
@@ -230,14 +235,15 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
               >
                 <span class="absolute -left-[25px] top-1 h-2.5 w-2.5 rounded-full bg-primary ring-4 ring-card">
                 </span>
-                <p class="text-sm font-medium leading-relaxed"><%= event.message || event.event || "event" %></p>
-                <p class="mono mt-1 text-xs text-muted-foreground"><%= event.at %></p>
+                <p class="break-words text-sm font-medium leading-relaxed"><%= event.message || event.event || "event" %></p>
+                <p class="mono break-all mt-1 text-xs text-muted-foreground"><%= event.at %></p>
               </li>
             </ol>
           </div>
         <% end %>
       </.card_content>
     </.card>
+    </section>
     """
   end
 

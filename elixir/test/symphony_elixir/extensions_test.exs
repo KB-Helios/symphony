@@ -522,6 +522,59 @@ defmodule SymphonyElixir.ExtensionsTest do
            )
   end
 
+  test "session detail exposes labelled operational sections" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailOrchestrator)
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+    snapshot = %{snapshot | running: [Map.put(running, :workspace_path, "/workspaces/MT-HTTP")]}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions/MT-HTTP")
+
+    assert has_element?(view, "section[aria-labelledby='session-summary-heading']", "MT-HTTP")
+    assert has_element?(view, "section[aria-labelledby='workspace-heading']", "/workspaces/MT-HTTP")
+    assert has_element?(view, "section[aria-labelledby='running-session-heading']", "thread-http")
+    assert has_element?(view, "section[aria-labelledby='recent-events-heading']")
+    assert has_element?(view, "button[phx-hook='ClipboardCopy'][data-copy='/workspaces/MT-HTTP']")
+    assert has_element?(view, "a[href='https://example.org/issues/MT-HTTP']")
+
+    assert html_response(get(build_conn(), "/sessions/MT-HTTP"), 200) =~
+             ~r/<title[^>]*>\s*MT-HTTP\s*·\s*Symphony\s*<\/title>/
+  end
+
+  test "session detail handles unknown and unsafe issue targets" do
+    orchestrator_name = Module.concat(__MODULE__, :DetailSafetyOrchestrator)
+
+    snapshot =
+      put_in(static_snapshot().running, [
+        %{hd(static_snapshot().running) | issue_url: "javascript:alert('nope')"}
+      ])
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, unsafe_view, _html} = live(build_conn(), "/sessions/MT-HTTP")
+    refute has_element?(unsafe_view, "a[href^='javascript:']")
+
+    {:ok, missing_view, html} = live(build_conn(), "/sessions/MT-MISSING")
+    assert html =~ "Issue not found"
+    assert has_element?(missing_view, "a[href='/sessions']", "View all sessions")
+  end
+
   test "sessions exposes equivalent desktop and mobile collections" do
     orchestrator_name = Module.concat(__MODULE__, :SessionsOrchestrator)
 
