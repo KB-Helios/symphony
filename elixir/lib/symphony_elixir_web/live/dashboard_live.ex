@@ -9,27 +9,40 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    payload = load_payload()
     q = ""
     harness_filter = "all"
 
     socket =
       socket
-      |> assign(:payload, payload)
+      |> assign(:payload, nil)
       |> assign(:now, DateTime.utc_now())
       |> assign(:q, q)
       |> assign(:harness_filter, harness_filter)
-      |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
-      |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
-      |> assign(:filtered_retrying, filtered_retrying(payload, q))
+      |> assign(:filtered_running, [])
+      |> assign(:filtered_blocked, [])
+      |> assign(:filtered_retrying, [])
       |> assign(:current_path, "/")
       |> assign(:page_title, "Operations")
 
-    if connected?(socket) do
-      :ok = ObservabilityPubSub.subscribe()
-    end
+    socket =
+      if connected?(socket) do
+        :ok = ObservabilityPubSub.subscribe()
+        start_async(socket, :load_payload, &load_payload/0)
+      else
+        socket
+      end
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_async(:load_payload, {:ok, payload}, socket) do
+    {:noreply, assign_payload(socket, payload)}
+  end
+
+  def handle_async(:load_payload, {:exit, _reason}, socket) do
+    payload = %{error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}}
+    {:noreply, assign_payload(socket, payload)}
   end
 
   @impl true
@@ -150,11 +163,11 @@ defmodule SymphonyElixirWeb.DashboardLive do
       <%= if is_nil(@payload) do %>
         <div role="status" aria-busy="true" aria-label="Loading dashboard" class="space-y-4">
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <div :for={_ <- 1..5} class="h-24 animate-pulse rounded-xl bg-muted/40"></div>
+            <div :for={_ <- 1..5} class="h-24 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
           </div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
         </div>
       <% else %>
         <%= if @payload[:error] do %>
@@ -796,6 +809,15 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   defp load_payload do
     Presenter.state_payload(orchestrator(), SymphonyElixirWeb.snapshot_timeout_ms())
+  end
+
+  defp assign_payload(socket, payload) do
+    socket
+    |> assign(:payload, payload)
+    |> assign(:now, DateTime.utc_now())
+    |> assign(:filtered_running, filtered_running(payload, socket.assigns.q, socket.assigns.harness_filter))
+    |> assign(:filtered_blocked, filtered_blocked(payload, socket.assigns.q, socket.assigns.harness_filter))
+    |> assign(:filtered_retrying, filtered_retrying(payload, socket.assigns.q))
   end
 
   defp orchestrator do

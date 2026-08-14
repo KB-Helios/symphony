@@ -10,6 +10,7 @@
 @plugin "../vendor/heroicons";
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant phx-connected (&:where(.phx-connected *));
 
 /*
   Symphony — "Orchid" theme

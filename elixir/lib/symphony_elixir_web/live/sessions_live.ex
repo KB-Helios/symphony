@@ -13,7 +13,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
   def mount(_params, _session, socket) do
     socket =
       socket
-      |> assign(:payload, load_payload())
+      |> assign(:payload, nil)
       |> assign(:current_path, "/sessions")
       |> assign(:tab, :all)
       |> assign(:sort_by, :identifier)
@@ -23,9 +23,25 @@ defmodule SymphonyElixirWeb.SessionsLive do
       |> assign(:per_page, @per_page)
       |> assign(:page_title, "Sessions")
 
-    if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
+    socket =
+      if connected?(socket) do
+        :ok = ObservabilityPubSub.subscribe()
+        start_async(socket, :load_payload, &load_payload/0)
+      else
+        socket
+      end
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_async(:load_payload, {:ok, payload}, socket) do
+    {:noreply, assign(socket, :payload, payload)}
+  end
+
+  def handle_async(:load_payload, {:exit, _reason}, socket) do
+    payload = %{error: %{code: "snapshot_unavailable", message: "Snapshot unavailable"}}
+    {:noreply, assign(socket, :payload, payload)}
   end
 
   @impl true
@@ -94,9 +110,9 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
       <%= if is_nil(@payload) do %>
         <div role="status" aria-busy="true" aria-label="Loading sessions" class="space-y-3">
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
-          <div class="h-14 animate-pulse rounded-xl bg-muted/40"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
+          <div class="h-14 rounded-xl bg-muted/40 motion-safe:animate-pulse"></div>
         </div>
       <% else %>
         <%= if @payload[:error] do %>
@@ -147,7 +163,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
               </div>
             </form>
 
-            <div aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
+            <div role="group" aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
               <.tab_button tab={@tab} value={:all} count={total(@payload)} icon="hero-squares-2x2" label="All" />
               <.tab_button
                 tab={@tab}

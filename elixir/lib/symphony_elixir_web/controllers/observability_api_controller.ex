@@ -93,6 +93,12 @@ defmodule SymphonyElixirWeb.ObservabilityApiController do
 
       {:error, :issue_not_found} ->
         error_response(conn, 404, "issue_not_found", "Issue not found")
+
+      {:error, :snapshot_timeout} ->
+        error_response(conn, 504, "snapshot_timeout", "Snapshot timed out")
+
+      {:error, :snapshot_unavailable} ->
+        error_response(conn, 503, "snapshot_unavailable", "Snapshot unavailable")
     end
   end
 

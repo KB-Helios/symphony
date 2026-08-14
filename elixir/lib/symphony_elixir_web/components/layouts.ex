@@ -55,7 +55,7 @@ defmodule SymphonyElixirWeb.Layouts do
 
   @spec app(map()) :: Phoenix.LiveView.Rendered.t()
   def app(assigns) do
-    current = assigns[:current_path] || "/"
+    current = Map.get(assigns, :current_path, "/")
 
     assigns =
       assigns
@@ -117,26 +117,25 @@ defmodule SymphonyElixirWeb.Layouts do
             <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground">
               S
             </span>
-            <span class="text-sm font-semibold tracking-tight">Symphony</span>
+            <span class="hidden text-sm font-semibold tracking-tight sm:inline">Symphony</span>
             <nav class="ml-1 flex items-center gap-1 md:hidden" aria-label="Primary">
               <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
               <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
             </nav>
           </div>
-          <nav class="hidden items-center gap-1 md:flex" aria-label="Primary">
-            <.top_nav_link href="/" current={@current}>Overview</.top_nav_link>
-            <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
-          </nav>
           <div class="flex items-center gap-2">
-            <span class="hidden items-center gap-2 rounded-full border border-border/70 bg-card px-3 py-1.5 text-xs font-medium shadow-sm sm:inline-flex">
+            <span
+              id="connection-status"
+              class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-2.5 py-1.5 text-xs font-medium shadow-sm sm:px-3"
+            >
               <span class="relative flex h-2 w-2">
-                <span class="absolute inline-flex h-full w-full motion-safe:animate-ping rounded-full bg-emerald-400 opacity-60 [data-phx-main:not(.phx-connected)_&]:hidden">
+                <span class="absolute hidden h-full w-full rounded-full bg-emerald-400 opacity-60 motion-safe:phx-connected:animate-ping phx-connected:inline-flex">
                 </span>
-                <span class="relative inline-flex h-2 w-2 rounded-full bg-emerald-500 [data-phx-main:not(.phx-connected)_&]:bg-muted-foreground">
+                <span class="relative inline-flex h-2 w-2 rounded-full bg-muted-foreground phx-connected:bg-emerald-500">
                 </span>
               </span>
-              <span class="[data-phx-main:not(.phx-connected)_&]:hidden">Live</span>
-              <span class="hidden [data-phx-main:not(.phx-connected)_&]:inline">Offline</span>
+              <span class="hidden phx-connected:inline">Live</span>
+              <span class="phx-connected:hidden">Offline</span>
             </span>
             <button
               type="button"
@@ -173,13 +172,13 @@ defmodule SymphonyElixirWeb.Layouts do
   end
 
   attr(:href, :string, required: true)
-  attr(:current, :string, required: true)
+  attr(:current, :any, required: true)
   slot(:inner_block, required: true)
 
   defp top_nav_link(assigns) do
     href = assigns.href
     current = assigns.current
-    active = current == href || (href == "/sessions" && String.starts_with?(current, "/sessions"))
+    active = current == href || (href == "/sessions" && is_binary(current) && String.starts_with?(current, "/sessions"))
     assigns = assign(assigns, :active, active)
 
     ~H"""
@@ -206,14 +205,14 @@ defmodule SymphonyElixirWeb.Layouts do
   end
 
   attr(:href, :string, required: true)
-  attr(:current, :string, required: true)
+  attr(:current, :any, required: true)
   attr(:icon, :string, required: true)
   slot(:inner_block, required: true)
 
   defp nav_link(assigns) do
     href = assigns.href
     current = assigns.current
-    active = current == href || (href == "/sessions" && String.starts_with?(current, "/sessions"))
+    active = current == href || (href == "/sessions" && is_binary(current) && String.starts_with?(current, "/sessions"))
     assigns = assign(assigns, :active, active)
 
     ~H"""

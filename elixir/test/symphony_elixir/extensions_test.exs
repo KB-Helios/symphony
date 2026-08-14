@@ -51,6 +51,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     def init(opts), do: {:ok, opts}
 
     def handle_call(:snapshot, _from, state) do
+      Process.sleep(Keyword.get(state, :delay_ms, 0))
       {:reply, Keyword.fetch!(state, :snapshot), state}
     end
 
@@ -510,16 +511,44 @@ defmodule SymphonyElixir.ExtensionsTest do
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
     {:ok, overview, html} = live(build_conn(), "/")
+    render_async(overview)
     assert html =~ ~s(id="skip-to-content" href="#main-content")
     assert has_element?(overview, "main#main-content[tabindex='-1']")
     assert has_element?(overview, "nav[aria-label='Primary'] a[aria-current='page'][href='/']")
 
     {:ok, sessions, _html} = live(build_conn(), "/sessions")
+    render_async(sessions)
 
     assert has_element?(
              sessions,
              "nav[aria-label='Primary'] a[aria-current='page'][href='/sessions']"
            )
+
+    assert length(Floki.find(Floki.parse_document!(render(sessions)), "nav[aria-label='Primary']")) == 2
+    assert has_element?(sessions, "#connection-status", "Live")
+    assert has_element?(sessions, "#connection-status", "Offline")
+  end
+
+  test "overview and sessions render loading states while their snapshots load" do
+    orchestrator_name = Module.concat(__MODULE__, :LoadingOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        delay_ms: 50,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 100)
+
+    {:ok, overview, overview_html} = live(build_conn(), "/")
+    assert overview_html =~ ~s(aria-label="Loading dashboard")
+    assert render_async(overview, 200) =~ "MT-HTTP"
+
+    {:ok, sessions, sessions_html} = live(build_conn(), "/sessions")
+    assert sessions_html =~ ~s(aria-label="Loading sessions")
+    assert render_async(sessions, 200) =~ "MT-HTTP"
   end
 
   test "session detail exposes labelled operational sections" do
@@ -576,6 +605,37 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     assert html_response(get(build_conn(), "/sessions/MT-MISSING"), 200) =~
              ~r/<title[^>]*>\s*Issue not found\s*·\s*Symphony\s*<\/title>/
+  end
+
+  test "session detail distinguishes missing issues from unavailable snapshots" do
+    unavailable_name = Module.concat(__MODULE__, :UnavailableDetailOrchestrator)
+    start_test_endpoint(orchestrator: unavailable_name, snapshot_timeout_ms: 5)
+
+    {:ok, unavailable_view, unavailable_html} = live(build_conn(), "/sessions/MT-UNKNOWN")
+    assert unavailable_html =~ "Session data unavailable"
+    assert has_element?(unavailable_view, "a[href='/sessions']", "View all sessions")
+    refute unavailable_html =~ "is not currently tracked"
+
+    assert json_response(get(build_conn(), "/api/v1/MT-UNKNOWN"), 503) == %{
+             "error" => %{
+               "code" => "snapshot_unavailable",
+               "message" => "Snapshot unavailable"
+             }
+           }
+
+    stop_supervised!(SymphonyElixirWeb.Endpoint)
+
+    timeout_name = Module.concat(__MODULE__, :TimeoutDetailOrchestrator)
+    {:ok, _pid} = SlowOrchestrator.start_link(name: timeout_name)
+    start_test_endpoint(orchestrator: timeout_name, snapshot_timeout_ms: 1)
+
+    {:ok, _timeout_view, timeout_html} = live(build_conn(), "/sessions/MT-UNKNOWN")
+    assert timeout_html =~ "Session data unavailable"
+    assert timeout_html =~ "Snapshot timed out"
+
+    assert json_response(get(build_conn(), "/api/v1/MT-UNKNOWN"), 504) == %{
+             "error" => %{"code" => "snapshot_timeout", "message" => "Snapshot timed out"}
+           }
   end
 
   test "session detail bounds long identifiers in found and not-found states" do
@@ -638,7 +698,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/sessions")
+    {:ok, view, _html} = live_and_wait("/sessions")
 
     assert has_element?(view, "#sessions-desktop table", "MT-HTTP")
     assert has_element?(view, "#sessions-mobile article", "MT-HTTP")
@@ -662,10 +722,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/sessions")
+    {:ok, view, _html} = live_and_wait("/sessions")
     view |> element("#sessions-tab-blocked") |> render_click()
 
     assert has_element?(view, "#sessions-tab-blocked[aria-pressed='true']")
+    assert has_element?(view, "[role='group'][aria-label='Filter sessions by status']")
     refute has_element?(view, "[role='tablist']")
     refute has_element?(view, "[role='tab']")
     assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
@@ -690,7 +751,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/sessions")
+    {:ok, view, _html} = live_and_wait("/sessions")
     view |> element("#sessions-mobile a[href='/sessions/MT-HTTP']", "MT-HTTP") |> render_click()
     assert_redirect(view, "/sessions/MT-HTTP")
   end
@@ -718,7 +779,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/sessions")
+    {:ok, view, _html} = live_and_wait("/sessions")
     assert has_element?(view, "#sessions-mobile article", "MT-01")
     refute has_element?(view, "#sessions-mobile article", "MT-11")
 
@@ -733,14 +794,14 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, _pid} = StaticOrchestrator.start_link(name: empty_name, snapshot: empty, health: %{ready?: true})
     start_test_endpoint(orchestrator: empty_name, snapshot_timeout_ms: 50)
 
-    {:ok, _view, empty_html} = live(build_conn(), "/sessions")
+    {:ok, _view, empty_html} = live_and_wait("/sessions")
     assert empty_html =~ "No sessions yet"
 
     stop_supervised!(SymphonyElixirWeb.Endpoint)
     missing_name = Module.concat(__MODULE__, :MissingSessionsOrchestrator)
     start_test_endpoint(orchestrator: missing_name, snapshot_timeout_ms: 5)
 
-    {:ok, _view, unavailable_html} = live(build_conn(), "/sessions")
+    {:ok, _view, unavailable_html} = live_and_wait("/sessions")
     assert unavailable_html =~ "Snapshot unavailable"
   end
 
@@ -762,6 +823,9 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert html =~ ~s(id="skip-to-content")
     assert html =~ ~s(href="/sessions")
     assert html =~ "View sessions"
+    assert html =~ ~s(id="connection-status")
+    assert html =~ "Offline"
+    refute html =~ ~s(aria-current="page")
 
     assert json_response(get(build_conn(), "/api/v1/missing/path"), 404) ==
              %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
@@ -788,7 +852,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/")
+    {:ok, view, _html} = live_and_wait("/")
 
     assert has_element?(view, "#operations-status[role='status']", "Attention required")
     assert has_element?(view, "section[aria-labelledby='running-sessions-heading']")
@@ -831,7 +895,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/")
+    {:ok, view, _html} = live_and_wait("/")
     assert has_element?(view, "#operations-status[role='status']", "Runtime idle")
   end
 
@@ -848,7 +912,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/")
+    {:ok, view, _html} = live_and_wait("/")
     assert has_element?(view, "#operations-status[role='status']", "Operational")
   end
 
@@ -890,7 +954,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, _html} = live(build_conn(), "/")
+    {:ok, view, _html} = live_and_wait("/")
     assert render_click(view, "refresh", %{}) =~ "Refresh requested"
 
     assert render_change(view, "select_harness", %{"harness" => "prime"}) =~
@@ -918,7 +982,7 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
-    {:ok, view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live_and_wait("/")
     assert html =~ "Operations"
     assert html =~ "MT-HTTP"
     assert html =~ "MT-RETRY"
@@ -985,7 +1049,7 @@ defmodule SymphonyElixir.ExtensionsTest do
       snapshot_timeout_ms: 5
     )
 
-    {:ok, view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live_and_wait("/")
     assert has_element?(view, "#operations-status[role='status']", "Unavailable")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
@@ -1069,6 +1133,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
+  end
+
+  defp live_and_wait(path) do
+    {:ok, view, _html} = live(build_conn(), path)
+    {:ok, view, render_async(view)}
   end
 
   defp static_snapshot do

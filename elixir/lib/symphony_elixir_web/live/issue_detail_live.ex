@@ -58,6 +58,25 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
               </.pill_link>
             </.card_content>
           </.card>
+        <% {:error, reason} when reason in [:snapshot_timeout, :snapshot_unavailable] -> %>
+          <.card class="card-elevated overflow-hidden">
+            <.card_content class="flex flex-col items-center justify-center py-16 text-center">
+              <span class="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                <.icon name="hero-exclamation-triangle" class="h-6 w-6" />
+              </span>
+              <p class="mt-4 text-lg font-semibold tracking-tight">Session data unavailable</p>
+              <p class="mt-1 max-w-md text-sm leading-relaxed text-muted-foreground">
+                <%= if reason == :snapshot_timeout do %>
+                  Snapshot timed out. The session may still be tracked; try again when the orchestrator responds.
+                <% else %>
+                  Snapshot unavailable. The session may still be tracked; try again when the orchestrator reconnects.
+                <% end %>
+              </p>
+              <.pill_link navigate="/sessions" class="mt-5">
+                View all sessions
+              </.pill_link>
+            </.card_content>
+          </.card>
       <% end %>
     </div>
     """
@@ -317,5 +336,6 @@ defmodule SymphonyElixirWeb.IssueDetailLive do
   end
 
   defp page_title({:ok, _issue}, identifier), do: identifier
-  defp page_title({:error, _reason}, _identifier), do: "Issue not found"
+  defp page_title({:error, :issue_not_found}, _identifier), do: "Issue not found"
+  defp page_title({:error, _reason}, _identifier), do: "Session unavailable"
 end
