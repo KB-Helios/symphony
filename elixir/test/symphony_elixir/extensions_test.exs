@@ -561,12 +561,34 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, view, _html} = live(build_conn(), "/sessions")
     view |> element("#sessions-tab-blocked") |> render_click()
 
-    assert has_element?(view, "#sessions-panel[aria-labelledby='sessions-tab-blocked']")
+    assert has_element?(view, "#sessions-tab-blocked[aria-pressed='true']")
+    refute has_element?(view, "[role='tablist']")
+    refute has_element?(view, "[role='tab']")
     assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
     refute has_element?(view, "#sessions-mobile article", "MT-HTTP")
 
-    view |> element("button[phx-value-sort='status']") |> render_click()
+    view |> element("#sessions-mobile-sort button[phx-value-sort='status']") |> render_click()
+    assert has_element?(view, "#sessions-mobile-sort[aria-label='Sort sessions']")
+    assert has_element?(view, "#sessions-mobile-sort button[phx-value-sort='status'][aria-pressed='true']")
+    assert has_element?(view, "#sessions-mobile-sort button[aria-label='Sort sessions by status, ascending']")
     assert has_element?(view, "th[aria-sort='ascending'] button[phx-value-sort='status']")
+  end
+
+  test "sessions mobile card links navigate to the session detail" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsMobileLinkOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions")
+    view |> element("#sessions-mobile a[href='/sessions/MT-HTTP']", "MT-HTTP") |> render_click()
+    assert_redirect(view, "/sessions/MT-HTTP")
   end
 
   test "sessions paginates the same rows on mobile" do

@@ -147,7 +147,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
               </div>
             </form>
 
-            <div role="tablist" aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
+            <div aria-label="Filter sessions by status" class="flex flex-wrap items-center gap-1.5">
               <.tab_button tab={@tab} value={:all} count={total(@payload)} icon="hero-squares-2x2" label="All" />
               <.tab_button
                 tab={@tab}
@@ -173,12 +173,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
             </div>
           </div>
 
-          <.card_content
-            class="p-0"
-            role="tabpanel"
-            id="sessions-panel"
-            aria-labelledby={"sessions-tab-#{@tab}"}
-          >
+          <.card_content class="p-0" id="sessions-panel">
             <%= if total(@payload) == 0 do %>
               <div class="p-6">
                 <.empty_state
@@ -278,6 +273,36 @@ defmodule SymphonyElixirWeb.SessionsLive do
                 </div>
 
                 <div id="sessions-mobile" class="divide-y divide-border/60 md:hidden">
+                  <div id="sessions-mobile-sort" role="group" aria-label="Sort sessions" class="flex items-center gap-2 p-4">
+                    <span class="text-xs font-medium text-muted-foreground">Sort by</span>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="identifier"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :identifier, "issue")}"}
+                      aria-pressed={to_string(@sort_by == :identifier)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      Issue
+                    </button>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="status"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :status, "status")}"}
+                      aria-pressed={to_string(@sort_by == :status)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      Status
+                    </button>
+                    <button
+                      phx-click="sort"
+                      phx-value-sort="state"
+                      aria-label={"Sort sessions by #{sort_label(@sort_by, @sort_dir, :state, "state")}"}
+                      aria-pressed={to_string(@sort_by == :state)}
+                      class="text-xs font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      State
+                    </button>
+                  </div>
                   <article :for={row <- paginated} class="space-y-3 p-4">
                     <div class="flex items-start justify-between gap-3">
                       <.link navigate={~p"/sessions/#{row.identifier}"} class="font-semibold tracking-tight">
@@ -379,9 +404,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
     ~H"""
     <button
       id={"sessions-tab-#{@value}"}
-      role="tab"
-      aria-selected={to_string(@tab == @value)}
-      aria-controls="sessions-panel"
+      aria-pressed={to_string(@tab == @value)}
       phx-click="switch_tab"
       phx-value-tab={@value}
       class={[
@@ -514,6 +537,13 @@ defmodule SymphonyElixirWeb.SessionsLive do
   end
 
   defp aria_sort(_current_by, _current_dir, _column), do: "none"
+
+  defp sort_label(current_by, current_dir, column, label) do
+    case aria_sort(current_by, current_dir, column) do
+      "none" -> label
+      direction -> "#{label}, #{direction}"
+    end
+  end
 
   defp parse_tab(tab) when is_binary(tab) do
     case String.downcase(String.trim(tab)) do
