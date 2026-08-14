@@ -960,25 +960,23 @@ defmodule SymphonyElixir.ExtensionsTest do
   test "overview reports refresh and rejects unsupported harness selection" do
     orchestrator_name = Module.concat(__MODULE__, :OverviewControlsOrchestrator)
 
-    assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
-
-    File.write!(
-      Workflow.workflow_file_path(),
-      """
-      ---
-      tracker:
-        kind: linear
-        endpoint: https://api.linear.app/graphql
-        api_key: token
-        project_slug: project
-      harness:
-        kind: codex
-      ---
-      You are an agent for this repository.
-      """
-    )
-
-    on_exit(&ensure_workflow_store_running/0)
+    with_workflow_backup(fn ->
+      File.write!(
+        Workflow.workflow_file_path(),
+        """
+        ---
+        tracker:
+          kind: linear
+          endpoint: https://api.linear.app/graphql
+          api_key: token
+          project_slug: project
+        harness:
+          kind: codex
+        ---
+        You are an agent for this repository.
+        """
+      )
+    end)
 
     {:ok, _pid} =
       StaticOrchestrator.start_link(

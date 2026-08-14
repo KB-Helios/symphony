@@ -22,7 +22,7 @@ defmodule SymphonyElixir.TestSupport do
       alias SymphonyElixir.Workspace
 
       import SymphonyElixir.TestSupport,
-        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0]
+        only: [write_workflow_file!: 1, write_workflow_file!: 2, restore_env: 2, stop_default_http_server: 0, with_workflow_backup: 1]
 
       setup do
         workflow_root =
@@ -85,6 +85,26 @@ defmodule SymphonyElixir.TestSupport do
       _ ->
         :ok
     end
+  end
+
+  def with_workflow_backup(fun) do
+    workflow_path = SymphonyElixir.Workflow.workflow_file_path()
+    original_content = File.read!(workflow_path)
+
+    if Process.whereis(SymphonyElixir.WorkflowStore) do
+      :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+    end
+
+    ExUnit.Callbacks.on_exit(fn ->
+      File.write!(workflow_path, original_content)
+
+      case Supervisor.restart_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore) do
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
+      end
+    end)
+
+    fun.()
   end
 
   defp workflow_content(overrides) do
