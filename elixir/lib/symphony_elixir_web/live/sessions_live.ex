@@ -21,7 +21,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
       |> assign(:page, 1)
       |> assign(:q, "")
       |> assign(:per_page, @per_page)
-      |> assign(:page_title, "Symphony — Sessions")
+      |> assign(:page_title, "Sessions")
 
     if connected?(socket), do: :ok = ObservabilityPubSub.subscribe()
 
@@ -173,7 +173,12 @@ defmodule SymphonyElixirWeb.SessionsLive do
             </div>
           </div>
 
-          <.card_content class="p-0" role="tabpanel" id="sessions-table-panel">
+          <.card_content
+            class="p-0"
+            role="tabpanel"
+            id="sessions-panel"
+            aria-labelledby={"sessions-tab-#{@tab}"}
+          >
             <%= if total(@payload) == 0 do %>
               <div class="p-6">
                 <.empty_state
@@ -197,7 +202,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   />
                 </div>
               <% else %>
-                <div class="overflow-x-auto">
+                <div id="sessions-desktop" class="hidden overflow-x-auto md:block">
                   <.table aria-busy="false">
                       <.table_caption class="sr-only">Sessions table</.table_caption>
                     <.table_header>
@@ -272,6 +277,35 @@ defmodule SymphonyElixirWeb.SessionsLive do
                   </.table>
                 </div>
 
+                <div id="sessions-mobile" class="divide-y divide-border/60 md:hidden">
+                  <article :for={row <- paginated} class="space-y-3 p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <.link navigate={~p"/sessions/#{row.identifier}"} class="font-semibold tracking-tight">
+                        <%= row.identifier %>
+                      </.link>
+                      <.status_badge status={row.status} />
+                    </div>
+                    <dl class="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+                      <div>
+                        <dt class="text-xs text-muted-foreground">State</dt>
+                        <dd class="mt-1"><%= row.state || "—" %></dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-muted-foreground">Harness</dt>
+                        <dd class="mt-1"><%= row.harness || "—" %></dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs text-muted-foreground">Host</dt>
+                        <dd class="mono mt-1 text-xs"><%= row.worker_host || "local" %></dd>
+                      </div>
+                      <div class="col-span-2">
+                        <dt class="text-xs text-muted-foreground">Latest activity</dt>
+                        <dd class="mt-1 break-words text-muted-foreground"><%= row.detail %></dd>
+                      </div>
+                    </dl>
+                  </article>
+                </div>
+
                 <div class="flex flex-col gap-3 border-t border-border/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                   <span class="text-xs text-muted-foreground">
                     Showing <%= showing_range(current_page, @per_page, total_filtered) %> of <%= total_filtered %>
@@ -344,9 +378,10 @@ defmodule SymphonyElixirWeb.SessionsLive do
   defp tab_button(assigns) do
     ~H"""
     <button
+      id={"sessions-tab-#{@value}"}
       role="tab"
       aria-selected={to_string(@tab == @value)}
-      aria-controls="sessions-table-panel"
+      aria-controls="sessions-panel"
       phx-click="switch_tab"
       phx-value-tab={@value}
       class={[

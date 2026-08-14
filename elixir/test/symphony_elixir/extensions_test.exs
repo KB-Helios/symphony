@@ -522,6 +522,102 @@ defmodule SymphonyElixir.ExtensionsTest do
            )
   end
 
+  test "sessions exposes equivalent desktop and mobile collections" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions")
+
+    assert has_element?(view, "#sessions-desktop table", "MT-HTTP")
+    assert has_element?(view, "#sessions-mobile article", "MT-HTTP")
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    assert has_element?(view, "#sessions-mobile article", "MT-RETRY")
+
+    view |> form("form[phx-change='search']", %{q: "MT-BLOCKED"}) |> render_change()
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#sessions-mobile article", "MT-HTTP")
+  end
+
+  test "sessions filters and sorts through accessible controls" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsControlsOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions")
+    view |> element("#sessions-tab-blocked") |> render_click()
+
+    assert has_element?(view, "#sessions-panel[aria-labelledby='sessions-tab-blocked']")
+    assert has_element?(view, "#sessions-mobile article", "MT-BLOCKED")
+    refute has_element?(view, "#sessions-mobile article", "MT-HTTP")
+
+    view |> element("button[phx-value-sort='status']") |> render_click()
+    assert has_element?(view, "th[aria-sort='ascending'] button[phx-value-sort='status']")
+  end
+
+  test "sessions paginates the same rows on mobile" do
+    orchestrator_name = Module.concat(__MODULE__, :SessionsPaginationOrchestrator)
+    snapshot = static_snapshot()
+    template = hd(snapshot.running)
+
+    running =
+      for number <- 1..11 do
+        suffix = number |> Integer.to_string() |> String.pad_leading(2, "0")
+
+        %{template | issue_id: "issue-#{suffix}", identifier: "MT-#{suffix}", session_id: "thread-#{suffix}"}
+      end
+
+    snapshot = %{snapshot | running: running, blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/sessions")
+    assert has_element?(view, "#sessions-mobile article", "MT-01")
+    refute has_element?(view, "#sessions-mobile article", "MT-11")
+
+    view |> element("button[aria-label='Next page']") |> render_click()
+    assert has_element?(view, "#sessions-mobile article", "MT-11")
+    refute has_element?(view, "#sessions-mobile article", "MT-01")
+  end
+
+  test "sessions distinguishes idle and unavailable snapshots" do
+    empty_name = Module.concat(__MODULE__, :EmptySessionsOrchestrator)
+    empty = %{static_snapshot() | running: [], blocked: [], retrying: []}
+    {:ok, _pid} = StaticOrchestrator.start_link(name: empty_name, snapshot: empty, health: %{ready?: true})
+    start_test_endpoint(orchestrator: empty_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, empty_html} = live(build_conn(), "/sessions")
+    assert empty_html =~ "No sessions yet"
+
+    stop_supervised!(SymphonyElixirWeb.Endpoint)
+    missing_name = Module.concat(__MODULE__, :MissingSessionsOrchestrator)
+    start_test_endpoint(orchestrator: missing_name, snapshot_timeout_ms: 5)
+
+    {:ok, _view, unavailable_html} = live(build_conn(), "/sessions")
+    assert unavailable_html =~ "Snapshot unavailable"
+  end
+
   test "browser fallback is HTML while unknown API routes stay JSON" do
     orchestrator_name = Module.concat(__MODULE__, :FallbackOrchestrator)
 
