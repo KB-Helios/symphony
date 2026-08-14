@@ -692,6 +692,18 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
     assert has_element?(view, "#retrying-sessions-mobile article", "MT-RETRY")
 
+    assert has_element?(
+             view,
+             "#running-sessions-mobile button[aria-label='Copy session ID for MT-HTTP']",
+             "Copy ID"
+           )
+
+    assert has_element?(
+             view,
+             "#blocked-sessions-mobile button[aria-label='Copy session ID for MT-BLOCKED']",
+             "Copy ID"
+           )
+
     view |> form("form[phx-change='search']", %{q: "MT-BLOCKED"}) |> render_change()
     assert has_element?(view, "#blocked-sessions-mobile article", "MT-BLOCKED")
     refute has_element?(view, "#running-sessions-mobile article", "MT-HTTP")
@@ -717,6 +729,23 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     {:ok, view, _html} = live(build_conn(), "/")
     assert has_element?(view, "#operations-status[role='status']", "Runtime idle")
+  end
+
+  test "overview identifies an operational runtime when sessions are running" do
+    orchestrator_name = Module.concat(__MODULE__, :OperationalOverviewOrchestrator)
+    snapshot = %{static_snapshot() | blocked: [], retrying: []}
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: snapshot,
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, _html} = live(build_conn(), "/")
+    assert has_element?(view, "#operations-status[role='status']", "Operational")
   end
 
   test "overview reports refresh and rejects unsupported harness selection" do
@@ -852,7 +881,8 @@ defmodule SymphonyElixir.ExtensionsTest do
       snapshot_timeout_ms: 5
     )
 
-    {:ok, _view, html} = live(build_conn(), "/")
+    {:ok, view, html} = live(build_conn(), "/")
+    assert has_element?(view, "#operations-status[role='status']", "Unavailable")
     assert html =~ "Snapshot unavailable"
     assert html =~ "snapshot_unavailable"
   end

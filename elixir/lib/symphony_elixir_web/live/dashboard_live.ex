@@ -634,6 +634,19 @@ defmodule SymphonyElixirWeb.DashboardLive do
                 <span :if={@kind == :running} class="mono"> <%= format_runtime_and_turns(entry.started_at, entry.turn_count, DateTime.utc_now()) %></span>
                 <span :if={@kind == :blocked} class="mono">Blocked <%= entry.blocked_at || "—" %></span>
               </div>
+              <.button
+                :if={entry.session_id}
+                variant="outline"
+                size="sm"
+                aria-label={"Copy session ID for #{entry.issue_identifier}"}
+                data-label="Copy ID"
+                data-copy={entry.session_id}
+                phx-hook="ClipboardCopy"
+                id={"copy-mobile-#{@kind}-#{entry.issue_identifier}"}
+                class="mt-3 h-7 rounded-full px-3 text-xs"
+              >
+                Copy ID
+              </.button>
               <p class="mt-3 text-sm"><%= entry.last_message || entry.error || to_string(entry.last_event || "n/a") %></p>
             </article>
           </div>
