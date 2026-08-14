@@ -8,6 +8,7 @@ defmodule SymphonyElixir.DokployMcpPackagingTest do
     env = File.read!(Path.join(@deployment_root, "env.example"))
     unit = File.read!(Path.join(@deployment_root, "dokploy-mcp.container"))
     codex = File.read!(Path.join(@deployment_root, "operator-codex.toml.example"))
+    installer = File.read!(Path.join(@deployment_root, "install.sh"))
 
     assert env =~ "DOKPLOY_REDACT_ENV=true"
     assert env =~ "DOKPLOY_ENABLED_TAGS=project,application,compose,deployment,domain"
@@ -21,5 +22,7 @@ defmodule SymphonyElixir.DokployMcpPackagingTest do
 
     assert codex =~ "url = \"https://ai-router-main.tail31b2b0.ts.net:3003/mcp\""
     assert codex =~ "default_tools_approval_mode = \"writes\""
+    assert installer =~ "systemctl --user start dokploy-mcp.service"
+    refute installer =~ "systemctl --user enable --now dokploy-mcp.service"
   end
 end

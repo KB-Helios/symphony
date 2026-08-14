@@ -35,7 +35,7 @@ if ! grep -Eq '^DOKPLOY_API_KEY=.+$' "$env_file"; then
 fi
 
 systemctl --user daemon-reload
-systemctl --user enable --now dokploy-mcp.service
+systemctl --user start dokploy-mcp.service
 
 if sudo -n true 2>/dev/null; then
   sudo tailscale serve --bg --yes --https=3003 http://127.0.0.1:3003
