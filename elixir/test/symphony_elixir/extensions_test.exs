@@ -51,8 +51,18 @@ defmodule SymphonyElixir.ExtensionsTest do
     def init(opts), do: {:ok, opts}
 
     def handle_call(:snapshot, _from, state) do
+      {snapshot, state} =
+        case Keyword.get(state, :snapshots, []) do
+          [snapshot | rest] -> {snapshot, Keyword.put(state, :snapshots, rest)}
+          [] -> {Keyword.fetch!(state, :snapshot), state}
+        end
+
+      if notify = Keyword.get(state, :notify) do
+        send(notify, {:snapshot_started, snapshot.running |> hd() |> Map.fetch!(:identifier)})
+      end
+
       Process.sleep(Keyword.get(state, :delay_ms, 0))
-      {:reply, Keyword.fetch!(state, :snapshot), state}
+      {:reply, snapshot, state}
     end
 
     def handle_call(:request_refresh, _from, state) do
@@ -525,6 +535,7 @@ defmodule SymphonyElixir.ExtensionsTest do
            )
 
     assert length(Floki.find(Floki.parse_document!(render(sessions)), "nav[aria-label='Primary']")) == 2
+    assert has_element?(sessions, "div.ml-auto > #connection-status")
     assert has_element?(sessions, "#connection-status", "Live")
     assert has_element?(sessions, "#connection-status", "Offline")
   end
@@ -549,6 +560,36 @@ defmodule SymphonyElixir.ExtensionsTest do
     {:ok, sessions, sessions_html} = live(build_conn(), "/sessions")
     assert sessions_html =~ ~s(aria-label="Loading sessions")
     assert render_async(sessions, 200) =~ "MT-HTTP"
+  end
+
+  test "overview and sessions keep the newest snapshot when refresh overlaps initial load" do
+    Enum.each([{DashboardLive, "/"}, {SessionsLive, "/sessions"}], fn {live_view, path} ->
+      orchestrator_name = Module.concat(__MODULE__, live_view)
+      old_snapshot = snapshot_with_identifier("MT-OLD")
+      new_snapshot = snapshot_with_identifier("MT-NEW")
+
+      {:ok, _pid} =
+        StaticOrchestrator.start_link(
+          name: orchestrator_name,
+          snapshot: new_snapshot,
+          snapshots: [old_snapshot, new_snapshot],
+          delay_ms: 50,
+          notify: self(),
+          health: %{ready?: true}
+        )
+
+      start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 200)
+
+      {:ok, view, _html} = live(build_conn(), path)
+      assert_receive {:snapshot_started, "MT-OLD"}
+      StatusDashboard.notify_update()
+
+      html = render_async(view, 500)
+      assert html =~ "MT-NEW"
+      refute html =~ "MT-OLD"
+
+      stop_supervised!(SymphonyElixirWeb.Endpoint)
+    end)
   end
 
   test "session detail exposes labelled operational sections" do
@@ -1193,6 +1234,18 @@ defmodule SymphonyElixir.ExtensionsTest do
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}},
       polling: %{checking?: false, next_poll_in_ms: 30_000, poll_interval_ms: 30_000}
+    }
+  end
+
+  defp snapshot_with_identifier(identifier) do
+    snapshot = static_snapshot()
+    [running] = snapshot.running
+
+    %{
+      snapshot
+      | running: [%{running | identifier: identifier}],
+        blocked: [],
+        retrying: []
     }
   end
 

@@ -46,7 +46,7 @@ defmodule SymphonyElixirWeb.SessionsLive do
 
   @impl true
   def handle_info(:observability_updated, socket) do
-    {:noreply, assign(socket, :payload, load_payload())}
+    {:noreply, start_async(socket, :load_payload, &load_payload/0)}
   end
 
   @impl true

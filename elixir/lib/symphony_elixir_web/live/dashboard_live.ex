@@ -128,17 +128,7 @@ defmodule SymphonyElixirWeb.DashboardLive do
 
   @impl true
   def handle_info(:observability_updated, socket) do
-    payload = load_payload()
-    q = socket.assigns.q
-    harness_filter = socket.assigns.harness_filter
-
-    {:noreply,
-     socket
-     |> assign(:payload, payload)
-     |> assign(:now, DateTime.utc_now())
-     |> assign(:filtered_running, filtered_running(payload, q, harness_filter))
-     |> assign(:filtered_blocked, filtered_blocked(payload, q, harness_filter))
-     |> assign(:filtered_retrying, filtered_retrying(payload, q))}
+    {:noreply, start_async(socket, :load_payload, &load_payload/0)}
   end
 
   @impl true

@@ -123,7 +123,7 @@ defmodule SymphonyElixirWeb.Layouts do
               <.top_nav_link href="/sessions" current={@current}>Sessions</.top_nav_link>
             </nav>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="ml-auto flex items-center gap-2">
             <span
               id="connection-status"
               class="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card px-2.5 py-1.5 text-xs font-medium shadow-sm sm:px-3"
