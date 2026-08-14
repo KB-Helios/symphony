@@ -7,6 +7,7 @@ defmodule SymphonyElixirWeb.Router do
   import Phoenix.LiveView.Router
 
   pipeline :browser do
+    plug(:accepts, ["html"])
     plug(:fetch_session)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {SymphonyElixirWeb.Layouts, :root})
@@ -37,6 +38,16 @@ defmodule SymphonyElixirWeb.Router do
     match(:*, "/api/v1/refresh", ObservabilityApiController, :method_not_allowed)
     get("/api/v1/:issue_identifier", ObservabilityApiController, :issue)
     match(:*, "/api/v1/:issue_identifier", ObservabilityApiController, :method_not_allowed)
+    match(:*, "/api/*path", ObservabilityApiController, :not_found)
+  end
+
+  scope "/", SymphonyElixirWeb do
+    pipe_through(:browser)
+
+    get("/*path", BrowserFallbackController, :not_found)
+  end
+
+  scope "/", SymphonyElixirWeb do
     match(:*, "/*path", ObservabilityApiController, :not_found)
   end
 end

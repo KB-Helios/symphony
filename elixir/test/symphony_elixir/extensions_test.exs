@@ -432,8 +432,7 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert json_response(post(build_conn(), "/api/v1/MT-1", %{}), 405) ==
              %{"error" => %{"code" => "method_not_allowed", "message" => "Method not allowed"}}
 
-    assert json_response(get(build_conn(), "/unknown"), 404) ==
-             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
+    assert html_response(get(build_conn(), "/unknown"), 404) =~ "Page not found"
 
     state_payload = json_response(get(build_conn(), "/api/v1/state"), 503)
 
@@ -494,10 +493,55 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert response(favicon_conn, 200) == File.read!("priv/static/favicon.png")
     assert Plug.Conn.get_resp_header(favicon_conn, "content-type") == ["image/png"]
 
-    assert json_response(get(build_conn(), "/dashboard.css"), 404) ==
-             %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
+    assert html_response(get(build_conn(), "/dashboard.css"), 404) =~ "Page not found"
+    assert html_response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 404) =~ "Page not found"
+  end
 
-    assert json_response(get(build_conn(), "/vendor/phoenix/phoenix.js"), 404) ==
+  test "shared shell exposes keyboard navigation and route state" do
+    orchestrator_name = Module.concat(__MODULE__, :ShellOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, overview, html} = live(build_conn(), "/")
+    assert html =~ ~s(id="skip-to-content" href="#main-content")
+    assert has_element?(overview, "main#main-content[tabindex='-1']")
+    assert has_element?(overview, "nav[aria-label='Primary'] a[aria-current='page'][href='/']")
+
+    {:ok, sessions, _html} = live(build_conn(), "/sessions")
+
+    assert has_element?(
+             sessions,
+             "nav[aria-label='Primary'] a[aria-current='page'][href='/sessions']"
+           )
+  end
+
+  test "browser fallback is HTML while unknown API routes stay JSON" do
+    orchestrator_name = Module.concat(__MODULE__, :FallbackOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(),
+        health: %{ready?: true}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    conn = get(build_conn(), "/missing-page")
+    html = html_response(conn, 404)
+    assert html =~ "Page not found"
+    assert html =~ ~s(id="skip-to-content")
+    assert html =~ ~s(href="/sessions")
+    assert html =~ "View sessions"
+
+    assert json_response(get(build_conn(), "/api/v1/missing/path"), 404) ==
              %{"error" => %{"code" => "not_found", "message" => "Route not found"}}
   end
 
@@ -633,11 +677,11 @@ defmodule SymphonyElixir.ExtensionsTest do
 
     dashboard_css = Req.get!("http://127.0.0.1:#{port}/dashboard.css")
     assert dashboard_css.status == 404
-    assert dashboard_css.body["error"]["code"] == "not_found"
+    assert dashboard_css.body =~ "Page not found"
 
     phoenix_js = Req.get!("http://127.0.0.1:#{port}/vendor/phoenix/phoenix.js")
     assert phoenix_js.status == 404
-    assert phoenix_js.body["error"]["code"] == "not_found"
+    assert phoenix_js.body =~ "Page not found"
 
     refresh_response =
       Req.post!("http://127.0.0.1:#{port}/api/v1/refresh",
