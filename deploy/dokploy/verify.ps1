@@ -45,7 +45,8 @@ function ConvertTo-RemoteBashCommand {
 
 $vmResult = Invoke-Rtk -Arguments @(
     "gcloud.cmd", "compute", "instances", "describe", $Instance,
-    "--zone", $Zone, "--project", $Project, "--format=json"
+    "--zone", $Zone, "--project", $Project,
+    "--format=json(name,status,networkInterfaces[0].accessConfigs[0].natIP)"
 )
 $vm = ($vmResult.Output | ConvertFrom-Json)
 if ($vm.name -ne $Instance -or $vm.status -ne "RUNNING") {
@@ -82,9 +83,9 @@ Invoke-Rtk -Arguments @(
     "--command=$remoteCommand"
 ) | Out-Null
 
-$health = Invoke-WebRequest -Uri "$SymphonyUrl/api/v1/health" -TimeoutSec 10
+$health = Invoke-WebRequest -UseBasicParsing -Uri "$SymphonyUrl/api/v1/health" -TimeoutSec 10
 if ($health.StatusCode -ne 200) { throw "Symphony health failed" }
-$ready = Invoke-WebRequest -Uri "$SymphonyUrl/api/v1/ready" -TimeoutSec 10
+$ready = Invoke-WebRequest -UseBasicParsing -Uri "$SymphonyUrl/api/v1/ready" -TimeoutSec 10
 if ($ready.StatusCode -ne 200) { throw "Symphony readiness failed" }
 
 $publicIp = $vm.networkInterfaces[0].accessConfigs[0].natIP
@@ -103,7 +104,12 @@ $domainRequest = @{
     Headers = @{ "x-api-key" = $DokployApiKey }
     TimeoutSec = 15
 }
-$domains = @(Invoke-RestMethod @domainRequest)
+$domainResponse = Invoke-RestMethod @domainRequest
+$domains = if ($domainResponse -is [Array] -and $domainResponse.Count -eq 0) {
+    @()
+} else {
+    @($domainResponse)
+}
 if ($domains.Count -ne 0) {
     throw "Symphony has Dokploy domains and is not private-only"
 }

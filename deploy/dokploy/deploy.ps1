@@ -108,7 +108,9 @@ function Invoke-Dokploy {
         $request.Body = $Body | ConvertTo-Json -Depth 10 -Compress
     }
 
-    return Invoke-RestMethod @request
+    $response = Invoke-RestMethod @request
+    if ($response -is [Array] -and $response.Count -eq 0) { return }
+    return $response
 }
 
 function Get-RequiredEnvironment {

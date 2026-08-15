@@ -29,6 +29,23 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     refute deploy =~ "tskey-auth-"
   end
 
+  test "Dokploy client suppresses empty JSON arrays instead of emitting a phantom item" do
+    deploy = File.read!(@deploy_script)
+
+    assert deploy =~ "$response = Invoke-RestMethod @request"
+    assert deploy =~ "$response -is [Array] -and $response.Count -eq 0"
+
+    # Verify non-empty responses are still surfaced correctly to project.all, project.one, and compose.create
+    assert deploy =~ ~r/\$projects = @\(Invoke-Dokploy -Route "project\.all"/
+    assert deploy =~ ~r/\$projectRecord = Invoke-Dokploy -Route "project\.one\?projectId=/
+    assert deploy =~ ~r/\$compose = Invoke-Dokploy -Route "compose\.create"/
+
+    # Verify that non-empty arrays are still accessible after the empty-array check
+    assert deploy =~ ~r/\$projects \| Where-Object \{ \$_\.name -eq "Symphony" \}/
+    assert deploy =~ ~r/@\(\$projectRecord\.environments\)/
+    assert deploy =~ ~r/if \(\$null -eq \$compose\)/
+  end
+
   test "verification checks private health, router responses, volumes, and public refusal" do
     verify = File.read!(@verify_script)
 
@@ -39,5 +56,9 @@ defmodule SymphonyElixir.DeploymentAutomationTest do
     assert verify =~ "domain.byComposeId"
     assert verify =~ "tailscale funnel status"
     assert verify =~ "ToBase64String"
+    assert verify =~ "--format=json(name,status,networkInterfaces[0].accessConfigs[0].natIP)"
+    refute verify =~ ~s("--format=json")
+    assert verify =~ "Invoke-WebRequest -UseBasicParsing"
+    assert verify =~ "$domainResponse -is [Array] -and $domainResponse.Count -eq 0"
   end
 end
